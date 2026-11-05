@@ -1,0 +1,31 @@
+{
+  "name": "fault-tolerance-lab",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "build:offline": "tsc -p tsconfig.offline.json && vite build --config vite.offline.config.ts",
+    "preview": "vite preview --host 127.0.0.1",
+    "typecheck": "tsc -p tsconfig.json",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.8.5",
+    "lucide-react": "1.52.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/postcss": "4.1.11",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@vitejs/plugin-react": "4.6.0",
+    "postcss": "8.5.32",
+    "tailwindcss": "4.1.11",
+    "typescript": "6.0.3",
+    "vite": "6.4.5"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "paths": { "@lab/topology": ["./src/OfflineDiagram.tsx"] } },
+  "exclude": ["src/ReactFlowDiagram.tsx"]
+}

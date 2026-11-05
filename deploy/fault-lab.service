@@ -1,0 +1,25 @@
+[Unit]
+Description=Fault Tolerance Lab supervisor and private workers
+After=network.target
+
+[Service]
+Type=simple
+User=faultlab
+Group=faultlab
+WorkingDirectory=/opt/fault-lab
+EnvironmentFile=/etc/fault-lab/backend.env
+ExecStart=/opt/fault-lab/.venv/bin/python -m backend
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+KillMode=control-group
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fault-lab
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

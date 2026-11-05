@@ -1,0 +1,17 @@
+# Template; configure a real OIDC provider and run oauth2-proxy separately.
+http_address = "127.0.0.1:4180"
+provider = "oidc"
+oidc_issuer_url = "https://identity.example.edu"
+redirect_url = "https://lab.example.edu/oauth2/callback"
+reverse_proxy = true
+upstreams = ["static://202"]
+set_xauthrequest = true
+cookie_secure = true
+cookie_httponly = true
+cookie_samesite = "lax"
+cookie_expire = "1h"
+cookie_refresh = "5m"
+# Explicit instructor/demo-user allowlist; do not use an unrestricted email domain.
+authenticated_emails_file = "/etc/fault-lab/allowed-emails"
+# Supply OAUTH2_PROXY_CLIENT_ID, OAUTH2_PROXY_CLIENT_SECRET and
+# OAUTH2_PROXY_COOKIE_SECRET through the service secret environment.

@@ -1,0 +1,8 @@
+# Copy to /etc/fault-lab/gateway-headers.conf, chmod 600.
+# Replace the placeholder with the same server-only secret as LAB_GATEWAY_TOKEN.
+# This overrides any client-supplied header. Never put the secret in VITE_*.
+proxy_set_header X-Lab-Gateway-Token "REPLACE_WITH_SERVER_ONLY_RANDOM_SECRET";
+proxy_set_header X-Lab-Internal-Token "";
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
