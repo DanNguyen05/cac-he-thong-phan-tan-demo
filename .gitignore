@@ -19,3 +19,5 @@ frontend/.env.production.local
 dist-offline/
 
 .agents/
+
+raft-kv-store-phamthehiep/

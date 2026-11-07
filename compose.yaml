@@ -1,0 +1,68 @@
+name: kv-transaction-lab
+
+x-service: &service
+  image: kv-transaction-lab:local
+  build: .
+  init: true
+  restart: "no" # A SIGKILL stays observable until the presenter explicitly starts it.
+  networks: [lab]
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+    interval: 3s
+    timeout: 3s
+    retries: 10
+    start_period: 15s
+  stop_grace_period: 5s
+
+services:
+  dashboard:
+    <<: *service
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "backend.kv_gateway:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      KV_SERVICE: gateway
+      KV_COORDINATOR: http://coordinator:8000
+      KV_RPC_SERVER: http://rpc:8000
+      KV_PEERS: '{"A":"http://participant-a:8000","B":"http://participant-b:8000","C":"http://participant-c:8000"}'
+    ports: ["127.0.0.1:19000:8000"]
+    volumes: [gateway-data:/data]
+    # No lifecycle dependency on coordinator: gateway stays up while it is stopped.
+  coordinator:
+    <<: *service
+    command: ["python", "-m", "uvicorn", "backend.kv_coordinator:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      KV_SERVICE: coordinator
+      KV_PEERS: '{"A":"http://participant-a:8000","B":"http://participant-b:8000","C":"http://participant-c:8000"}'
+    ports: ["127.0.0.1:19001:8000"]
+    volumes: [coordinator-data:/data]
+  rpc:
+    <<: *service
+    environment: { KV_SERVICE: rpc }
+    ports: ["127.0.0.1:19002:8000"]
+    volumes: [rpc-data:/data]
+  participant-a:
+    <<: *service
+    environment: { KV_SERVICE: A }
+    ports: ["127.0.0.1:19003:8000"]
+    volumes: [a-data:/data]
+  participant-b:
+    <<: *service
+    environment: { KV_SERVICE: B }
+    ports: ["127.0.0.1:19004:8000"]
+    volumes: [b-data:/data]
+  participant-c:
+    <<: *service
+    environment: { KV_SERVICE: C }
+    ports: ["127.0.0.1:19005:8000"]
+    volumes: [c-data:/data]
+
+volumes:
+  gateway-data:
+  coordinator-data:
+  rpc-data:
+  a-data:
+  b-data:
+  c-data:
+networks:
+  lab:
+    internal: true

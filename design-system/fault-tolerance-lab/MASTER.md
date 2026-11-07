@@ -69,3 +69,14 @@ Presentation hides navigation/header, enlarges the topology and keeps the seven 
 ## Verification
 
 See VERIFICATION.md for actual commands, reports, visual checks and deployment limits. Reference screenshots and browser reports are local artifacts under test-results, excluded from the release.
+
+
+## Distributed KV Transaction Lab extension
+
+Read the installed UI UX Pro Max skill and ran design-system generation for developer monitoring/data verification. The generic dark recommendation was overridden by the user's explicit light direction. Existing light tokens, typography, topology and control hierarchy remain in use.
+
+KV data is placed beneath the canvas inside the topology surface, with large real values and compact labels. GET/PUT and recorded replay use accessible native dialogs. The seven main control groups remain unchanged. Real service health includes observed timestamps and boot IDs; HTTP unreachable is not presented as confirmed Docker stopped. The environment badge remains visible in presentation: Process is never relabeled as Docker.
+
+External fault gates show commands, not fake crash buttons. Step/N are disabled during a required external restart. Result verification is green only when backend HTTP reads match expected values. Before that, the interface explicitly says the global result is unconfirmed. Recorded replay sends no mutations and does not claim historical node state reconstruction.
+
+Runtime composition: five downstream services plus the independent gateway, six SQLite stores/volumes. RPC topology uses the separate rpc worker, not participant A. Group displays actual received/delivered sequences. 2PC shows balances A/B and metadata C. Recovery shows inventory/checkpoint/replay/verification.

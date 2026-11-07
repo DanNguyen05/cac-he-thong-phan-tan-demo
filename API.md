@@ -1,92 +1,73 @@
-# Hợp đồng API
+# API Distributed KV Transaction Lab
 
-Base URL mặc định `http://127.0.0.1:8000`. JSON UTF-8. Mọi endpoint quản trị chỉ dành cho máy cục bộ. Swagger của Supervisor ở `/docs`; Coordinator ở `:8001/docs`; node ở `:8101/docs`, `:8102/docs`, `:8103/docs`. HTTP 409 biểu thị xung đột lifecycle/giao thức, 422 là đầu vào không hợp lệ, 503 là dịch vụ không khả dụng.
+Compose: gateway `http://127.0.0.1:19000`; coordinator `:19001`; rpc `:19002`; A/B/C `:19003/19004/19005`. Local process runner dùng base 19100. JSON UTF-8. Local trusted demo; không có Internet authentication. Swagger `/docs` từng service.
 
-## Supervisor / frontend API
+## Gateway
 
-| Method | Endpoint | Response / hành vi |
+| Method | Path | Hành vi |
 |---|---|---|
-| GET | `/api/health` | `{service,pid,processes:{coordinator,A,B,C:{alive,pid,port}}}` |
-| GET | `/api/catalog` | `{rpc,group,commit,recovery}`; mỗi mục là danh sách `[scenario_id,title_vi,description_vi]` |
-| GET | `/api/state` | Snapshot `{run,events,nodes,services,transactions}` |
-| GET | `/api/events` | SSE, named event `snapshot`, payload giống `/api/state`, chu kỳ khoảng 450 ms |
-| POST | `/api/runs` | Bắt đầu tác vụ async, trả `{id}`; 409 nếu run cũ chưa kết thúc hoặc transaction chưa xử lý |
-| POST | `/api/step` | Cho phép hành động backend tiếp theo; `{step:true}` |
-| POST | `/api/reset` | Hủy worker, restart process thiếu, xóa toàn bộ state thí nghiệm; `{reset:true}` |
-| POST | `/api/resolve` | Restart process thiếu và tiếp tục durable decision; `{resolving:tx_id,decision}` |
-| POST | `/api/process/{target}/{action}` | `target=coordinator,A,B,C`; `action=crash,restart,unavailable,available`. Coordinator chỉ hỗ trợ crash/restart |
-
-`/internal/process/{target}/{action}` là callback HTTP local từ Coordinator tới Supervisor để thực thi crash/restart node. Body bắt buộc `{run_id}`; ID cũ sau reset/completion bị từ chối 409. Không có auth vì toàn bộ service bind loopback; không mở ra mạng công cộng.
-
-### Tạo run
+| GET | /health, /healthz | Gateway sống độc lập worker |
+| GET | /api/health | HTTP health thực của năm service bên dưới, boot ID, observed_at |
+| GET | /api/state | run/events/nodes/services/transactions/runtime, tương thích frontend hiện có |
+| GET | /api/events | SSE named `snapshot`, khoảng 450ms, reconnect đọc snapshot; không nối giả event |
+| GET | /api/catalog | Các scenario hợp lệ theo module |
+| POST | /api/runs | Chạy demo có orchestration backend thật |
+| POST | /api/step | Cho qua boundary đang WAITING; không phải step animation |
+| POST | /api/control | paused hoặc pace_ms tại boundary, không thay timeout network |
+| POST | /api/reset | Reset demo qua HTTP, giữ volume; từ chối service offline/PREPARED |
+| POST | /api/resolve | Xem coordinator recovery; không start container |
+| GET | /api/kv/{node}/{key} | Proxy GET tới worker rpc/A/B/C |
+| POST | /api/kv/{node} | Proxy ghi KV; không ghi thủ công khi run đang active |
+| POST | /api/transactions | Giao dịch tùy chỉnh, được gắn vào dashboard run |
+| GET | /api/transactions/{id} | Durable transaction của coordinator |
+| POST | /api/group/catchup | target và stream; retransmit history tới receiver đã restart |
+| POST | /api/process/{target}/{action} | Luôn 403 trong KV: dùng Docker CLI cục bộ |
 
 ```json
-{
-  "module": "rpc",
-  "scenario": "lost_response",
-  "mode": "step",
-  "deduplicate": true,
-  "retry": true,
-  "max_attempts": 3,
-  "target": "B",
-  "delay_ms": 0
-}
+{"module":"commit","scenario":"coordinator_crash","mode":"auto","pace_ms":300,"target":"B"}
 ```
 
-- `module`: `rpc|group|commit|recovery`, bắt buộc.
-- `scenario`: lấy từ catalog, mặc định `normal`. Scenario ID phải thuộc module tương ứng.
-- `mode`: `auto|step`, mặc định `auto`.
-- `deduplicate`, `retry`: boolean, mặc định true; chỉ có tác dụng RPC.
-- `max_attempts`: integer 1–5, mặc định 3. RPC: tổng số lần gửi; multicast: số vòng; 2PC: số lần gửi quyết định cho mỗi participant. PREPARE không retry trong phiên bản này.
-- `target`: `A|B|C`, mặc định B; recipient lỗi hoặc participant lỗi/NO.
-- `delay_ms`: integer 0–1500. RPC: lần gửi đầu; multicast: vòng đầu; 2PC: PREPARE. Recovery không áp dụng tùy chọn này. Kịch bản RPC `delay` buộc trễ ít nhất 1000 ms.
+RunConfig: module rpc/group/commit/recovery; scenario từ catalog; mode auto/step; pace_ms 0–3000; target A/B/C; deduplicate/retry boolean; max_attempts 1–5 cho RPC. delay_ms hiện giữ trong hợp đồng tương thích nhưng không áp dụng trong KV; UI KV ẩn tùy chọn này. Lost fault là policy xác định theo scenario, không random.
 
-Coordinator trả run ID ngay sau khi tạo background task; kết quả cuối lấy qua SSE/state. Status: `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `PARTIAL`, `BLOCKED`, `DECISION_PENDING`, `INTERRUPTED`. `COMPLETED` có thể là transaction ABORT hợp lệ; đọc trường `result.decision` để phân biệt quyết định với việc thực thi protocol thành công.
+Status: RUNNING, WAITING, COMPLETED, FAILED, PARTIAL, BLOCKED, DECISION_PENDING, INTERRUPTED. COMPLETED với ABORT là protocol đã kết thúc đúng; đọc result.decision. result.verified chỉ true sau đọc HTTP khớp giá trị; chưa complete thì false. `runtime.containerized=false` là host process, không phải Docker.
 
-### Snapshot
+Event có `seq,time,run_id,source,target,kind,detail,data`; IDs nằm trong data (`request_id`, `transaction_id`, `stream/sequence`, `operation_id`). Node events thu qua HTTP có service/service_seq. Gateway lưu journal riêng; snapshot giới hạn 1200 event hiện tại. `/state` từng worker giữ journal đầy đủ trong phiên demo; quy mô lớp học, chưa phân trang journal/history lớn.
 
-`run` chứa ID, module, scenario, status, config, created Unix timestamp, result nullable. `result` khác nhau theo protocol, luôn kèm explanation tiếng Việt khi có kết quả cuối.
+## KV worker (rpc và participant)
 
-Mỗi event: `{seq,run_id,time,source,target,kind,detail,data}`. `data` có thể chứa `message_id` (từng lần gửi), `operation_id` (giữ nguyên qua retry), `attempt`, `path`, `response`, `transaction_id`. Snapshot giới hạn 600 event gần nhất của run hiện tại; database giữ event đầy đủ tới Reset. Không dùng SSE `Last-Event-ID`: reconnect gửi full snapshot hiện tại, nên UI thay thế state thay vì nối lặp sự kiện.
+| Method | Path | Body / kết quả |
+|---|---|---|
+| GET | /health | service,node,pid,boot_id,runtime,available |
+| GET | /state | KV, locks, tx, group receipt/delivery, operations, checkpoint, recovery, events |
+| GET | /kv/{key} | node,key,value,locked; 404 nếu chưa tồn tại |
+| POST | /kv | `{id,key,operation:"PUT" hoặc "INCREMENT",value,run_id?,deduplicate?}` |
+| POST | /prepare | `{id,run_id,writes,expected?,vote_no?}` → vote/state |
+| POST | /decision | `{id,run_id,decision:"COMMIT" hoặc "ABORT"}` |
+| POST | /multicast | `{stream,run_id,seq,payload}` → ack,received,delivered,missing |
+| POST | /recovery/setup | `{run_id}` → inventory=100, reset redo/checkpoint recovery riêng |
+| POST | /operations | `{id,run_id,delta}` → inventory value và duplicate |
+| POST | /checkpoint | `{run_id?}` → seq,value |
+| POST | /recover | `{run_id?}` → checkpoint metadata, replayed IDs/entries, value |
+| POST | /reset | `{}`; từ chối prepared locks, không xóa Docker volume |
 
-`nodes` chứa state đọc HTTP trực tiếp từ A/B/C. Node chết: `{node,available:false,crashed:true}`; UI không tái sử dụng counter cũ như dữ liệu live. Unavailable: process còn sống, `available:false`, các counter vẫn đọc được. `services` lấy từ child-process handles, độc lập với availability.
-
-## Participant API
-
-| Method | Path | JSON body | Kết quả |
-|---|---|---|---|
-| GET | `/health` | — | `{node,pid,available}` |
-| GET | `/state` | — | Counters, checkpoint, operations, transactions, receipts, recovery report, 60 log entries gần nhất |
-| POST | `/rpc` | `{id,deduplicate:true,delta:1}` | `{id,value,execution_count,duplicate}` |
-| POST | `/multicast` | `{id,payload}` | `{id,ack,duplicate,delivery_count}` |
-| POST | `/prepare` | `{id,amount:10,vote_no:false}` | `{id,vote:"YES"|"NO",state}` |
-| POST | `/decision` | `{id,decision:"COMMIT"|"ABORT"}` | `{id,state,duplicate}`; mâu thuẫn hoặc COMMIT không PREPARED trả 409 |
-| POST | `/operation` | `{id,delta:5}` | `{id,value,duplicate}` |
-| POST | `/checkpoint` | `{}` | `{seq,value}` |
-| POST | `/recover` | `{}` | `{checkpoint_seq,checkpoint_value,replayed,value,pid}` |
-| POST | `/availability` | `{available:false}` | Health state; không giết process |
-| POST | `/reset` | `{}` | Xóa toàn bộ protocol state node, `{reset:node_name}` |
-
-Protocol endpoints trả 503 nếu node bị đánh dấu unavailable; health/state/availability/reset vẫn truy cập được. ID do Coordinator tạo từ UUID; mỗi operation/message thuộc run được định danh bền vững.
-
-## Ví dụ PowerShell
+PUT/INCREMENT hỗ trợ int/string theo phép ghi, key dài tối đa 80. `inventory` dành riêng redo API, không ghi qua PUT/PREPARE. Request ID hoặc log ID dùng lại với nội dung khác: 409. Key locked: 409. Decision mâu thuẫn hoặc COMMIT chưa PREPARED: 409. 422 là input không hợp lệ.
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8000/api/health
-$body = @{module='commit'; scenario='coordinator_crash'; mode='auto'} | ConvertTo-Json
-Invoke-RestMethod http://127.0.0.1:8000/api/runs -Method Post -ContentType 'application/json' -Body $body
-# Khi run BLOCKED:
-Invoke-RestMethod http://127.0.0.1:8000/api/state
-Invoke-RestMethod http://127.0.0.1:8000/api/resolve -Method Post
+$body=@{id='request-demo-1';key='counter';operation='INCREMENT';value=1} | ConvertTo-Json
+Invoke-RestMethod -Method Post -ContentType application/json -Body $body http://127.0.0.1:19002/kv
+# Gửi lại cùng body: duplicate=true, counter không tăng lần nữa.
 ```
 
+## Coordinator
 
-## Bổ sung v2 (tương thích endpoint cũ)
+POST `/transactions` nhận id (mặc định UUID), run_id, scenario, mode, target, pace_ms, writes tùy chọn. writes bắt buộc gồm đúng A/B/C, mỗi node có ít nhất một key. Bỏ writes thì đọc balances và tạo A-10/B+10/C transaction ID. Expected values được gửi trong PREPARE để phát hiện dữ liệu thay đổi giữa read và prepare.
 
-- Run config nhận thêm `pace_ms: 0..3000` (mặc định LAB_PACE × 1000) và `paused: boolean`.
-- POST /api/control với `{paused?: boolean, pace_ms?: number}` cập nhật worker đang chạy; trả `{paused,pace_ms}`. 409 nếu không có worker hoặc yêu cầu pause/resume trong step mode. Thay đổi được phản ánh ở run.config qua SSE.
-- Pause dừng ở ranh giới hành động; lệnh đang gửi có thể hoàn tất. Next hoạt động khi pause, vẫn giữ trạng thái paused ở gate kế tiếp. Resume auto tiếp tục từ gate hiện tại. Pacing không thay đổi deadline transport hoặc quyết định giao thức.
-- GET /healthz trả liveness tối thiểu; GET /readyz trả 200/503 theo trạng thái bốn process.
-- Các route giao diện có SPA fallback; API/assets không tồn tại vẫn trả 404.
-- LAB_PUBLIC yêu cầu gateway token server-only; /api, UI và docs đều được bảo vệ. Manual process control mặc định 403. Callback /internal cần internal token trong public mode. Xem DEPLOYMENT.md.
-- Origin ngoài danh sách cho phép bị từ chối khi mutation. CORS chỉ cho origin khai báo rõ ràng và hỗ trợ credential cookies.
+```json
+{"id":"tx-custom-1","writes":{"A":{"balance":80},"B":{"balance":120},"C":{"last_transaction":"custom-1"}},"scenario":"normal"}
+```
+
+GET `/transactions/{id}` và `/state` chứa phase, decision (null trước durable decision), votes, acks, writes, before_values và journal. Phase: PREPARING, READY, PAUSED_AFTER_PREPARE, DECISION_DURABLE, PAUSED_AFTER_COMMIT, DECISION_PENDING, COMPLETE, INTERRUPTED. POST `/step` / `/control` điều khiển boundary. POST `/reset` từ chối transaction chưa complete.
+
+Không có endpoint “tự quyết định tại participant”, “chọn COMMIT tùy ý sau coordinator crash” hoặc “Docker exec”. Decision messages giả định trusted network/client; đây chưa phải public authenticated transaction service.
+
+API legacy giữ nguyên trong backend.manager/node/coordinator và tài liệu docs/LEGACY_API.md.

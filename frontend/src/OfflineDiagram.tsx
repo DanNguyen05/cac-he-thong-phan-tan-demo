@@ -28,13 +28,13 @@ export default function OfflineDiagram({ page, state, onInspect }: { page: Page;
   const lines: { id: string; source: string; target: string; label: string; color: string; seq: number; reverse?: boolean; rpc?: boolean }[] = []
   if (page === 'rpc') {
     const request = [...state.events].reverse().find(e => ['SEND', 'RETRY', 'TIMEOUT', 'REQUEST_LOST', 'UNAVAILABLE'].includes(e.kind) && (e.source === 'Client' || e.target === 'A'))
-    const response = [...state.events].reverse().find(e => ['ACK', 'RESPONSE_LOST'].includes(e.kind) && e.source === 'A')
+    const response = [...state.events].reverse().find(e => ['ACK', 'RESPONSE_LOST'].includes(e.kind) && ['A', 'rpc'].includes(e.source))
     lines.push({ id: 'request', source: 'coordinator', target: 'A', rpc: true, seq: request?.seq || 0, label: !request ? 'Yêu cầu' : request.kind === 'SEND' ? `Request · ${String(request.data.operation_id || '').slice(-8)}` : eventLabel(request, state), color: request && /LOST|TIMEOUT|UNAVAILABLE/.test(request.kind) ? 'var(--red)' : 'var(--blue)' })
     lines.push({ id: 'response', source: 'A', target: 'coordinator', rpc: true, reverse: true, seq: response?.seq || 0, label: !response ? 'Chờ phản hồi' : response.kind === 'ACK' ? 'Response · OK' : 'Mất phản hồi', color: response?.kind === 'RESPONSE_LOST' ? 'var(--red)' : 'var(--green)' })
   } else for (const box of boxes.filter(b => !['coordinator', 'checkpoint', 'log'].includes(b.id))) {
     const event = [...state.events].reverse().find(e => (e.source === box.id || e.target === box.id) && ['SEND', 'ACK', 'VOTE', 'TIMEOUT', 'UNAVAILABLE', 'REQUEST_LOST', 'RETRANSMIT'].includes(e.kind))
     const reverse = event?.source === box.id
-    lines.push({ id: box.id, source: box.id === 'web' ? 'web' : reverse ? box.id : 'coordinator', target: box.id === 'web' ? 'coordinator' : reverse ? 'coordinator' : box.id, reverse, label: box.id === 'web' ? 'SSE' : event ? eventLabel(event, state) : 'HTTP', seq: event?.seq || 0, color: event && /LOST|TIMEOUT|UNAVAILABLE/.test(event.kind) ? 'var(--red)' : reverse ? 'var(--green)' : 'var(--blue)' })
+    lines.push({ id: box.id, source: box.id === 'rpc' && state.runtime ? reverse ? 'rpc' : 'web' : box.id === 'web' ? 'web' : reverse ? box.id : 'coordinator', target: box.id === 'rpc' && state.runtime ? reverse ? 'web' : 'rpc' : box.id === 'web' ? 'coordinator' : reverse ? 'coordinator' : box.id, reverse, label: box.id === 'web' ? state.runtime ? 'HTTP' : 'SSE' : event ? eventLabel(event, state) : 'HTTP', seq: event?.seq || 0, color: event && /LOST|TIMEOUT|UNAVAILABLE/.test(event.kind) ? 'var(--red)' : reverse ? 'var(--green)' : 'var(--blue)' })
   }
   if (page === 'recovery') for (const [id, kind] of [['checkpoint', 'CHECKPOINT'], ['log', 'RECOVERY']]) {
     const event = [...state.events].reverse().find(e => e.kind === kind)

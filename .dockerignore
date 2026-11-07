@@ -1,0 +1,16 @@
+.git
+.agents
+.tools
+.pytest_cache
+**/__pycache__
+**/node_modules
+**/dist
+**/dist-offline
+**/*.tsbuildinfo
+data
+test-results
+release
+raft-kv-store-phamthehiep
+.env
+**/.env.local
+**/.env.production.local

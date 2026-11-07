@@ -84,7 +84,7 @@ export default function ReactFlowDiagram({ page, state, onInspect }: { page: Pag
   let edges: Message[]
   if (page === 'rpc') {
     const request = [...state.events].reverse().find(e => ['SEND', 'RETRY', 'TIMEOUT', 'REQUEST_LOST', 'UNAVAILABLE'].includes(e.kind) && (e.source === 'Client' || e.target === 'A'))
-    const response = [...state.events].reverse().find(e => ['ACK', 'RESPONSE_LOST'].includes(e.kind) && e.source === 'A')
+    const response = [...state.events].reverse().find(e => ['ACK', 'RESPONSE_LOST'].includes(e.kind) && ['A', 'rpc'].includes(e.source))
     const requestLabel = !request ? 'Yêu cầu' : request.kind === 'SEND' ? `Request · ${String(request.data.operation_id || '').slice(-8)}` : request.kind === 'RETRY' ? 'Retry · cùng request ID' : request.kind === 'REQUEST_LOST' ? 'Mất yêu cầu' : request.kind === 'TIMEOUT' ? 'Timeout' : 'Server không khả dụng'
     const responseLabel = !response ? 'Chờ phản hồi' : response.kind === 'ACK' ? 'Response · OK' : 'Mất phản hồi'
     edges = [
@@ -95,8 +95,8 @@ export default function ReactFlowDiagram({ page, state, onInspect }: { page: Pag
     edges = definitions.filter(node => !['coordinator', 'checkpoint', 'log'].includes(node.id)).map(node => {
       const event = [...state.events].reverse().find(e => (e.source === node.id || e.target === node.id) && ['SEND', 'ACK', 'TIMEOUT', 'RETRY', 'REQUEST_LOST', 'RESPONSE_LOST', 'VOTE', 'UNAVAILABLE', 'RETRANSMIT'].includes(e.kind))
       const reverse = event?.source === node.id
-      return edge(`link-${node.id}`, node.id === 'web' ? 'web' : reverse ? node.id : 'coordinator', node.id === 'web' ? 'coordinator' : reverse ? 'coordinator' : node.id,
-        node.id === 'web' ? 'SSE' : event ? eventLabel(event, state) : 'HTTP',
+      return edge(`link-${node.id}`, node.id === 'rpc' && state.runtime ? reverse ? 'rpc' : 'web' : node.id === 'web' ? 'web' : reverse ? node.id : 'coordinator', node.id === 'rpc' && state.runtime ? reverse ? 'web' : 'rpc' : node.id === 'web' ? 'coordinator' : reverse ? 'coordinator' : node.id,
+        node.id === 'web' ? state.runtime ? 'HTTP' : 'SSE' : event ? eventLabel(event, state) : 'HTTP',
         event && /LOST|TIMEOUT|UNAVAILABLE|NO/.test(event.kind + event.data.vote) ? 'var(--red)' : reverse ? 'var(--green)' : 'var(--blue)', event?.seq || 0, !!reverse)
     })
     if (page === 'recovery') {

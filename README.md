@@ -1,123 +1,131 @@
-# Distributed Systems — Fault Tolerance Lab
+# Distributed KV Transaction Lab
 
-Phòng thực hành tương tác bằng tiếng Việt cho chương 8, mục 8.3–8.6, *Distributed Systems*, 4th Edition, Maarten van Steen & Andrew S. Tanenbaum. Bốn giao thức chạy qua HTTP giữa các tiến trình Python độc lập; giao diện đọc sự kiện và trạng thái thật.
+Đồ án Chương 8, mục **8.3–8.7**, *Distributed Systems, 4th Edition* — van Steen & Tanenbaum. Nâng cấp Fault Tolerance Lab hiện có; giữ chế độ Python legacy, không triển khai Raft/Paxos.
 
-## Chạy trên Windows
+**HTTP thật → xử lý độc lập → lỗi thật → recovery đúng → đọc lại dữ liệu.**
 
-Yêu cầu Python **3.11+**, Node.js **20.19+** và npm. Không cần Docker, tài khoản cloud hay API trả phí. Lần cài dependency đầu tiên cần Internet hoặc cache npm/pip đầy đủ.
+## Chạy bằng Docker Desktop Windows
 
-```powershell
-.\setup.bat
-.\start.bat
-```
-
-Mở **http://127.0.0.1:8000**. `start.bat` chạy một Supervisor, một Coordinator và ba node; nhấn **Ctrl+C** trong terminal để dừng các tiến trình con. Khởi tạo database tự động. Không dùng `--reload` hoặc nhiều Uvicorn workers: lab cần một supervisor duy nhất.
-
-Nếu dependency Python đã có trong môi trường hệ thống và `frontend/dist` đã được build:
+Yêu cầu Docker Desktop **Linux containers**, Docker Compose v2 và Engine hoạt động. Không cần cloud/API trả phí. Lần build đầu cần Internet tải image/npm/pip.
 
 ```powershell
-.\start.bat -SystemPython
+.\kv-start.bat
+# Hoặc:
+.\scripts\kv-demo.ps1 -Action up
 ```
 
-### Cài đặt thủ công
+Mở **http://127.0.0.1:19000/rpc**. Script build React/TypeScript và Python image, khởi động sáu container, chờ health checks. Engine chưa chạy thì script báo lỗi; không coi đó là khởi động thành công.
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-cd frontend
-npm install
-npm run build
-cd ..
-.\.venv\Scripts\python.exe -m backend
+docker compose -p kv-transaction-lab up -d --build --wait
+docker compose -p kv-transaction-lab ps --all
+.\scripts\kv-demo.ps1 -Action health
 ```
 
-Giao diện đã build được phục vụ từ FastAPI, không cần chạy Node khi trình bày. Để phát triển, chạy backend và `npm run dev` ở hai terminal; mở http://127.0.0.1:5173. Vite proxy `/api` tới port 8000.
+Port 19000–19005 chỉ bind **127.0.0.1**; script kiểm tra xung đột khi khởi động mới. Không tác động cổng 18001–18005 của dự án tham khảo.
 
-### Giao diện theo ảnh tham chiếu
+## Kiến trúc
 
-Giao diện Light Mode được tái cấu trúc theo ảnh thiết kế: sidebar gọn, bốn chỉ số lớn, topology ở trung tâm, bảng điều khiển phải và ba sự kiện chính phía dưới. Mở **http://127.0.0.1:8000/rpc**, chọn kịch bản, nhấn **Chạy thí nghiệm** và quan sát kết quả. Cùng design system áp dụng cho 8.4, 8.5 và 8.6 với sơ đồ riêng.
+| Service Compose | Host port | Nhiệm vụ | Volume riêng |
+|---|---:|---|---|
+| dashboard | 19000 | Web, client RPC, publisher, collector/SSE | gateway-data |
+| coordinator | 19001 | 2PC, durable decision, tự recovery khi boot | coordinator-data |
+| rpc | 19002 | KV, INCREMENT, durable dedup | rpc-data |
+| participant-a | 19003 | KV, 2PC, FIFO multicast, checkpoint/redo | a-data |
+| participant-b | 19004 | KV, 2PC, FIFO multicast | b-data |
+| participant-c | 19005 | KV, 2PC, FIFO multicast | c-data |
 
-React Flow 12.12.1 có custom nodes/edges, zoom, pan, fit, drag và inspector. **SVG fallback** vẫn có trong bundle: mở **Cài đặt > Bộ hiển thị**, hoặc query `?renderer=svg`. Cấu hình retry/dedup/node/độ trễ và nguyên lý nằm trong Cài đặt; **Xem tất cả** mở journal đầy đủ. Nút thông tin của sơ đồ 2PC mở sequence.
+Mỗi service là một Uvicorn process trong container riêng, giao tiếp HTTP qua Docker network. Không dùng chung database hoặc volume. Gateway không spawn container, không mount Docker socket, không chạy shell từ API. Dashboard vẫn sống khi Coordinator/worker không phản hồi.
 
-[Design system](design-system/fault-tolerance-lab/MASTER.md) ghi cách áp dụng UI UX Pro Max và ảnh tham chiếu. Metrics, timeline, sequence và animation đều dựa trên API/SSE thật; không gán số liệu mẫu từ ảnh. Backend và Windows launcher không thay đổi trong lần redesign này.
+KV ban đầu: participants có `balance=100`, `last_transaction="none"`, `inventory=100`; RPC có `counter=0`. Transaction mặc định chuyển 10 từ A sang B, C lưu transaction ID.
 
-```powershell
-cd frontend
-npm ci
-npm run build
-# TypeScript:
-npm run typecheck
-# Build chỉ dùng SVG nếu cần:
-npm run build:offline
-```
+## Bốn thí nghiệm và tổng kết
 
-N/P/Esc hoạt động khi nút giữ focus và không chặn nhập văn bản. **N** chạy bước tiếp khi WAITING; **P** tạm dừng/tiếp tục auto tại ranh giới hành động; nút **Trình chiếu** mở bố cục lớp học; **Esc** đóng inspector hoặc thoát trình chiếu. Tốc độ thực thi thay đổi nhịp giữa hành động backend; độ trễ transport và timeout vẫn độc lập.
-
-Bản `release/fault-tolerance-lab.zip` gồm source, bundle React Flow + SVG, lockfile, design system, mẫu môi trường và cấu hình triển khai. Không kèm database, token, node_modules hoặc cache. Sau giải nén dùng `setup.bat -SkipFrontend` rồi `start.bat`, hoặc `start.bat -SystemPython` nếu dependency Python đã có.
-
-### Chạy như ứng dụng web
-
-FastAPI phục vụ frontend production và hỗ trợ deep links /rpc, /group, /commit, /recovery. API/SSE URL và CORS có thể cấu hình. Xem [DEPLOYMENT.md](DEPLOYMENT.md) cho local development, reverse proxy SSE, health checks, authentication/OIDC, giới hạn admin và kế hoạch Linux VM. Python và các worker phải thực sự chạy; static hosting riêng không thay thế backend.
-
-## Các thí nghiệm
-
-| Mục | Thực thi | Tình huống xác định |
+| Mục | Thao tác | Bằng chứng |
 |---|---|---|
-| 8.3 | RPC cộng bộ đếm tại Node A | Thành công, mất request, mất response, unavailable, delay, duplicate; bật/tắt retry và dedup |
-| 8.4 | Reliable multicast fan-out tới A/B/C | ACK, mất tại node được chọn, retransmit, khử duplicate, thành viên lỗi |
-| 8.5 | Two-Phase Commit | All YES → COMMIT; NO → ABORT; participant crash; Coordinator crash sau PREPARED → blocking; phục hồi quyết định |
-| 8.6 | Checkpoint + logical redo logging | Ghi operation, checkpoint, crash thật, restart, replay, gửi operation trùng |
+| 8.3 RPC | Normal / mất phản hồi + retry | Cùng request ID, 2 attempts, 1 execution, counter tăng 1; còn sau restart |
+| 8.4 Group | HTTP multicast #1–#3, B mất #2 | NACK, history retransmit, FIFO deliver 1,2,3 |
+| 8.5 Commit | COMMIT / NO / crash trước-sau decision | PREPARED giữ khóa; không decision thì recovery ABORT; durable COMMIT thì replay COMMIT |
+| 8.6 Recovery | Checkpoint 100, redo -3,-2, kill/start | GET inventory=95, replay lại vẫn 95 |
+| 8.7 Tổng kết | So sánh giả định | Dedup, delivery, atomic decision và local recovery có bảo đảm khác nhau |
 
-Chọn **Từng bước** trước khi nhấn **Chạy thí nghiệm**. Chế độ này dừng backend trước mỗi hành động giao thức; nút **Bước tiếp** / phím **N** mới thực thi hành động tiếp. **P** tạm dừng/tiếp tục chế độ tự động; dùng nút **Trình chiếu** để mở; **Esc** thoát. Nhấn node xem PID, database state và điều khiển crash/restart; nhấn sự kiện để xem JSON gốc. Xuất snapshot JSON để lưu minh chứng.
+Chọn scenario → **Chạy thí nghiệm** → xem topology/KV → **Đã kiểm chứng bằng HTTP GET**. Chọn **Từng bước** trước Run để dùng **N**; **P** pause/resume tại ranh giới hành động. **Esc** đóng dialog/thoát trình chiếu. Nhập văn bản không kích hoạt shortcut.
+
+**GET / PUT** đọc/ghi worker qua gateway. Key PREPARED trả 409; `inventory` chỉ ghi qua redo API để bảo toàn recovery. **Replay log** chỉ xem timeline đã ghi, không gửi request hoặc tái tạo state quá khứ.
+
+## Gây lỗi thật
+
+```powershell
+# Scenario “Dừng sau PREPARED”, Run, chờ PAUSED_AFTER_PREPARE:
+.\scripts\kv-demo.ps1 -Action stop -Service coordinator
+# Dashboard còn sống, participant PREPARED, giao dịch BLOCKED.
+.\scripts\kv-demo.ps1 -Action start -Service coordinator
+# Chưa có durable decision => recovery ABORT.
+
+# Recovery “Crash container → recovery 95”, Run, chờ lời nhắc:
+.\scripts\kv-demo.ps1 -Action crash -Service participant-a
+.\scripts\kv-demo.ps1 -Action start -Service participant-a
+.\scripts\kv-demo.ps1 -Action verify
+```
+
+Worker/coordinator dùng `restart: "no"` để SIGKILL còn quan sát được tới khi start thủ công. Gateway dùng `unless-stopped`. Không dùng `down -v`. `-Action down` giữ named volumes. Reset qua API chỉ được phép khi mọi service đang sống và không có transaction chưa giải quyết.
+
+## Kiểm chứng trực tiếp
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:19002/kv/counter
+Invoke-RestMethod http://127.0.0.1:19003/kv/balance
+Invoke-RestMethod http://127.0.0.1:19004/kv/balance
+Invoke-RestMethod http://127.0.0.1:19003/kv/inventory
+Invoke-RestMethod http://127.0.0.1:19001/state | ConvertTo-Json -Depth 12
+docker compose -p kv-transaction-lab logs --tail 100 coordinator
+```
+
+`/state` từng service chứa durable journal, locks, transactions, redo/checkpoint. SQLite trong `/data/kv-{service}.sqlite`; dùng Python/sqlite3 trong đúng container để đối chiếu. Gateway không đọc file database của các service khác.
 
 ## Kiểm thử
 
 ```powershell
-.\test.bat
-# Để build và kiểm tra riêng SVG fallback:
-.\test.bat -Offline
-# Backend + build offline + UI (lab phải đang chạy):
-.\test.bat -Offline -Browser
-# Hoặc chỉ chạy backend:
+python -m pip install -r requirements.txt
 python -m pytest tests -q
-# UI end-to-end: khởi động lab trước, sau đó:
+# Mặc định: test legacy + KV bằng sáu process thật, data/port tạm.
+
+# Cùng acceptance KV bằng container/volume thật:
+$env:KV_TEST_MODE='docker'
+python -m pytest tests/test_kv_lab.py -q
+Remove-Item Env:KV_TEST_MODE
+
 cd frontend
+npm ci
+npm run typecheck
+npm run build
+# Legacy riêng đang chạy ở LAB_UI_URL, mặc định 8000:
 npx playwright test
+# KV Docker đang chạy ở 19000:
+$env:LAB_UI_URL='http://127.0.0.1:19000'
+npx playwright test --config playwright.kv.config.ts
 ```
 
-Backend tests khởi động **năm tiến trình thật**, dùng HTTP loopback, database tạm và bộ port riêng; không mock node. Bao phủ các trường hợp RPC, multicast, 2PC, checkpoint/recovery, step mode, SSE, reset và chạy liên tiếp. UI tests dùng Chromium/Edge (`npx playwright install chromium` nếu chưa có browser), gọi backend đang chạy ở `LAB_UI_URL` (mặc định 8000). Xem [VERIFICATION.md](VERIFICATION.md) để biết kết quả thực chạy và giới hạn kiểm chứng.
+**Docker acceptance có reset/crash/recreate container thuộc project `kv-transaction-lab`.** Không chạy trong phiên cần giữ dữ liệu demo. Không xóa volumes hoặc tác động project khác. Engine không chạy thì fixture báo **skipped**, không phải passed. Kết quả thực tế ở [VERIFICATION.md](VERIFICATION.md).
 
-## Cấu hình
+## Khi Docker Engine chưa hoạt động
 
-| Biến môi trường | Mặc định | Ý nghĩa |
-|---|---|---|
-| `LAB_PORT` | `8000` | Supervisor; Coordinator = +1, A/B/C = +101/+102/+103 |
-| `LAB_DATA` | `./data` | Thư mục bốn database SQLite và process logs |
-| `LAB_PACE` | `0.3` | Giây nghỉ giữa hành động ở auto mode; chỉ hỗ trợ quan sát |
-| `LAB_TIMEOUT` | `0.65` | Deadline mỗi lần gửi, tính cả delay/drop của transport |
-| `LAB_API_URL` | `http://127.0.0.1:8000` | Backend proxy của Vite khi phát triển |
-| `LAB_UI_URL` | `http://127.0.0.1:8000` | URL trong bộ test giao diện |
+Có thể nghiệm thu logic bằng sáu process độc lập, vẫn HTTP/database thật:
 
 ```powershell
-$env:LAB_PORT='8200'
-$env:LAB_DATA="$PWD\data-session-2"
-python -m backend
+python scripts/kv_local.py
+# http://127.0.0.1:19100/rpc — UI ghi rõ Process, không phải Docker.
+# Ctrl+C dừng các process con; data/kv-local vẫn giữ.
 ```
 
-Tất cả service chỉ bind `127.0.0.1`. Local mode dành cho máy trình bày. Internet deployment phải bật LAB_PUBLIC và gateway được xác thực như DEPLOYMENT.md; không mở trực tiếp các port backend.
+Host mode không chứng minh Docker volume/network/recreate. Lỗi `listing WSL distros ... context deadline exceeded` thuộc Docker Desktop/WSL. Không tự reset/unregister distribution hoặc xóa Docker data. Sau khi Engine hoạt động, chạy lại acceptance Docker.
 
-## Lưu ý vận hành
+## Source và chế độ cũ
 
-- **Reset xóa toàn bộ dữ liệu thí nghiệm**, kể cả PREPARED chưa có quyết định. Đây là reset quản trị, không phải recovery hay ABORT của giao thức.
-- Khi 2PC blocking, dùng **Khởi động & phục hồi** để Coordinator đọc durable log rồi gửi quyết định. Không khởi chạy thí nghiệm mới trên một transaction chưa xử lý.
-- Mỗi lần bắt đầu kịch bản mới sẽ làm mới trạng thái các node; run và event trước vẫn còn trong journal tới lần Reset. Đây là lab một người trình bày, một kịch bản tại một thời điểm.
-- Nếu port bận: dừng lab cũ bằng Ctrl+C hoặc chọn `LAB_PORT` khác. Xem `data/process-logs/*.log` để chẩn đoán service không khởi động được.
-- Nếu chỉ restart node, trạng thái bền vững vẫn còn. Nếu xóa file database thì không thể phục hồi state đó.
+`backend/kv_common.py`, `kv_node.py`, `kv_coordinator.py`, `kv_gateway.py` là các service mới. `compose.yaml`, `Dockerfile`, `scripts/kv-demo.ps1` cung cấp triển khai. Frontend tái sử dụng layout sáng, React Flow/SVG, shortcuts và presentation; thêm KV workbench/replay.
 
-Chi tiết: [ARCHITECTURE.md](ARCHITECTURE.md), [DEMO_GUIDE.md](DEMO_GUIDE.md), [API.md](API.md).
+Backend legacy và `start.bat -SystemPython` vẫn chạy ở 8000. Tài liệu cũ giữ tại [docs/LEGACY_README.md](docs/LEGACY_README.md). Dự án Raft chỉ được đọc để học cách tổ chức, không đưa code của nó vào thuật toán hoặc release mới.
 
-Tài liệu thư viện: [React Flow](https://reactflow.dev/learn), [FastAPI StreamingResponse](https://fastapi.tiangolo.com/advanced/custom-response/), [SQLite transactions](https://www.sqlite.org/lang_transaction.html).
+## Giới hạn
 
-## Light Mode thống nhất
-
-Toàn bộ giao diện dùng Light Mode: nền #F8FAFC, card/node/modal trắng, chữ slate và primary #0669E8. Không có nút chuyển Dark Mode; lựa chọn tối đã lưu trước đây không được áp dụng. React Flow, SVG, timeline, code blocks và Presentation Mode dùng cùng semantic tokens. Backend/API/giao thức không thay đổi trong lần chỉnh giao diện này.
+Chỉ dành cho **local classroom/trusted demo**, chưa sẵn sàng public Internet. Không có consensus, HA coordinator, Byzantine protection, distributed snapshot, 3PC hay atomic/total-order multicast. Không tuyên bố exactly-once tổng quát. 2PC không cung cấp distributed read snapshot: từng node có thể nhận COMMIT ở thời điểm khác nhau; dashboard chỉ báo hoàn thành khi đủ ACK và GET xác minh. Xem [ARCHITECTURE.md](ARCHITECTURE.md), [API.md](API.md), [DEMO_GUIDE.md](DEMO_GUIDE.md) cho giả định và kịch bản 8–10 phút.

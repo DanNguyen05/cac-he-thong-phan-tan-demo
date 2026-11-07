@@ -36,6 +36,10 @@ export function serviceData(page: Page, state: Snapshot) {
   if (page === 'rpc') {
     list[0] = { ...list[0], x: 20, y: 100, title: 'Client', role: 'client', value: '' }
     list[1] = { ...list[1], x: 620, y: 100, title: 'Server', role: 'server', value: `Thực thi: ${state.nodes.A?.counters?.rpc ?? '—'} lần` }
+    if (state.runtime) {
+      const rpc = state.nodes.rpc
+      list[1] = { ...list[1], pid: rpc?.pid, port: state.services.rpc?.port, status: state.services.rpc?.alive ? 'ONLINE' : 'UNREACHABLE', value: `Thực thi: ${state.events.filter(event => event.kind === 'RPC_EXECUTED').length} lần` }
+    }
   }
   if (page === 'group') list[0] = { ...list[0], title: 'Sender', value: 'Multicast' }
   if (page === 'recovery') {
@@ -44,6 +48,20 @@ export function serviceData(page: Page, state: Snapshot) {
     const node = state.nodes.A
     list.push({ id: 'checkpoint', x: 680, y: 0, title: 'Checkpoint', role: 'resource', status: node?.checkpoint ? 'DURABLE' : 'UNKNOWN', value: `Value: ${node?.checkpoint?.value ?? '—'} · #${node?.checkpoint?.seq ?? '—'}` })
     list.push({ id: 'log', x: 680, y: 290, title: 'Redo log', role: 'resource', status: node?.operations ? 'DURABLE' : 'UNKNOWN', value: `${node?.operations?.length ?? '—'} ops · ${node?.recovery?.replayed?.length ?? '—'} replay` })
+  }
+  if (state.runtime && !state.services.coordinator?.alive) {
+    const coordinatorNode = list.find(node => node.id === 'coordinator')
+    if (coordinatorNode) coordinatorNode.status = 'UNREACHABLE'
+  }
+  if (state.runtime && ['rpc', 'group', 'recovery'].includes(page)) list[0] = { ...list[0], status: 'ONLINE', pid: state.runtime.gateway.pid }
+  if (state.runtime && page === 'overview') {
+    list[0] = { ...list[0], title: 'Dashboard / Gateway', role: 'HTTP + SSE', value: 'Independent service', pid: state.runtime.gateway.pid }
+    const rpc = state.nodes.rpc
+    list.push({ id: 'rpc', x: 620, y: 0, title: 'RPC Server', role: 'HTTP RPC + SQLite', status: state.services.rpc?.alive ? 'ONLINE' : 'UNREACHABLE', value: `counter: ${rpc?.kv?.counter ?? '—'}`, pid: rpc?.pid, port: state.services.rpc?.port })
+  }
+  if (state.runtime && page === 'commit') {
+    const metadata = list.find(node => node.id === 'C')
+    if (metadata) metadata.value = state.nodes.C?.kv?.last_transaction === 'none' ? 'Chưa có giao dịch' : `Tx: ${String(state.nodes.C?.kv?.last_transaction || '—').slice(-8)}`
   }
   return list.map(item => ({ ...item, page }))
 }

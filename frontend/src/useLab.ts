@@ -62,7 +62,8 @@ export default function useLab() {
   }
   const running = ['RUNNING', 'WAITING'].includes(state.run?.status || '')
   const paused = state.run?.config.paused === true
-  const canPause = running && state.run?.config.mode === 'auto'
+  const externalWait = state.runtime && ['AWAIT_CONTAINER_RESTART', 'AWAIT_RPC_STOP', 'AWAIT_RECEIVER_STOP'].includes(String(state.run?.result?.stage))
+  const canPause = running && state.run?.config.mode === 'auto' && !externalWait
   const unresolved = ['BLOCKED', 'DECISION_PENDING', 'INTERRUPTED'].includes(state.run?.status || '')
   const current = page === 'overview' || state.run?.module === page
   const display: Snapshot = current ? state : { ...state, run: null, events: [], transactions: [] }
@@ -84,7 +85,7 @@ export default function useLab() {
       if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
       if ((event.target as HTMLElement).closest('input, select, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return
       if (help || inspectNode || inspectEvent) return
-      if (event.key.toLowerCase() === 'n' && connected && state.run?.status === 'WAITING' && !busy) {
+      if (event.key.toLowerCase() === 'n' && connected && state.run?.status === 'WAITING' && !externalWait && !busy) {
         event.preventDefault()
         void act('/step')
       }
@@ -95,7 +96,7 @@ export default function useLab() {
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [act, busy, connected, help, inspectNode, inspectEvent, state.run?.status, canPause, paused])
+  }, [act, busy, connected, help, inspectNode, inspectEvent, state.run?.status, canPause, paused, externalWait])
 
   const selectEvent = (event: LogEvent) => { setSelected(event.seq); setInspectEvent(event) }
   const exportLog = () => {

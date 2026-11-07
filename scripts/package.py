@@ -10,11 +10,11 @@ def main():
     if not (ROOT / "frontend/dist/index.html").exists():
         raise SystemExit("Build the frontend before packaging")
     files = []
-    for name in ("backend", "scripts", "tests", "frontend/src", "frontend/e2e", "frontend/dist", "frontend/public", "deploy", "design-system"):
+    for name in ("backend", "scripts", "tests", "docs", "frontend/src", "frontend/e2e", "frontend/dist", "frontend/public", "deploy", "design-system"):
         files.extend(path for path in (ROOT / name).rglob("*")
                      if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc")
     for pattern in ("*.md", "*.bat", "requirements.txt", ".gitignore", "frontend/*.json",
-                    "frontend/*.js", "frontend/*.ts", "frontend/*.html", ".env.example", "frontend/.env.example"):
+                    "frontend/*.js", "frontend/*.ts", "frontend/*.html", ".env.example", "frontend/.env.example", "Dockerfile", "compose.yaml", ".dockerignore"):
         files.extend(ROOT.glob(pattern))
     OUTPUT.parent.mkdir(exist_ok=True)
     with ZipFile(OUTPUT, "w", ZIP_DEFLATED) as archive:

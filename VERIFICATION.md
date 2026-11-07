@@ -1,92 +1,99 @@
-# Kiểm chứng redesign theo ảnh tham chiếu
+# Kiểm chứng Distributed KV Transaction Lab
 
-Ngày 2026-11-05. Windows, Python 3.11.9, Node.js 20.20.2, Microsoft Edge qua Playwright 1.63. React 19.1, React Flow 12.12.1, TypeScript 6.0.3, Vite 6.4.5.
+Ngày 2026-11-06; Windows, Python 3.11, Node 20.20.2, Edge/Playwright 1.63, React Flow 12.12.1. Tất cả kết quả dưới đây là lệnh thực chạy, không mock kết quả giao thức.
 
-Đã phân tích ảnh tham chiếu trước khi sửa, tái cấu trúc layout và đối chiếu ảnh chụp ứng dụng chạy thật. Đã đọc UI UX Pro Max, chạy design-system generation và UX search. Quyết định thiết kế ở design-system/fault-tolerance-lab/MASTER.md. Không sử dụng hoặc suy đoán dữ liệu Figma.
+## Kết quả
 
-## Kết quả thực chạy
-
-| Hạng mục | Kết quả | Báo cáo |
+| Bộ kiểm tra | Kết quả | Artifact cục bộ |
 |---|---|---|
-| Backend | 32 passed, 0 lỗi, 39.934 giây | test-results/reference-backend.xml |
-| Frontend trước vòng tinh chỉnh cuối | 16 passed, 0 failed/flaky/skipped | test-results/frontend-reference.json |
-| Frontend production cuối | 18 passed, 0 failed/flaky/skipped | test-results/frontend-reference-final.json |
-| SVG-only production cuối | 8 passed, 0 failed/flaky/skipped | test-results/frontend-reference-offline-final.json |
-| TypeScript strict | npm run typecheck — pass | Chạy trước production build cuối |
-| Production React Flow | npm run build — pass | Bundle dùng cho release |
-| SVG-only build | npm run build:offline — pass | Đã chạy browser tests trên chính bundle SVG này |
-| Responsive | 375 / 768 / 1024 / 1440 / 1920px | Cả năm workspace, không tràn ngang document |
+| Baseline backend trước sửa | 32 passed | test-results/kv-baseline.xml |
+| Baseline browser trước sửa | 18 passed | test-results/kv-baseline-frontend.json |
+| Backend cuối: 32 legacy + 24 KV | **56 passed**, 0 failed/skipped, 103.336s | test-results/kv-final-backend.xml |
+| KV protocols riêng | 24 passed | test-results/kv-final-protocol.xml |
+| Browser React Flow / KV | **8 passed**, 0 flaky/failed/skipped | test-results/kv-frontend-final.json |
+| Browser legacy | **18 passed**, 0 flaky/failed/skipped | test-results/kv-legacy-frontend-final.json |
+| SVG-only / KV | **8 passed** | test-results/kv-svg-frontend.json |
+| SVG-only / legacy | **8 passed** | test-results/kv-svg-legacy.json |
+| Browser fault sau chỉnh màu semantic | 1 passed, gồm 5 luồng lỗi/restart thật | test-results/kv-fault-final.json |
+| TypeScript strict | npm run typecheck: pass | Chạy trước build production |
+| React Flow production | npm run build: pass | Bundle chuẩn dùng cho ZIP |
+| SVG-only build | npm run build:offline: pass; bản cuối còn build --outDir dist-offline | Giữ runtime SVG fallback |
+| Compose | config --quiet/config JSON: pass | test-results/kv-compose-config.json |
+| PowerShell/Python syntax | Parser kv-demo.ps1 và compileall: pass | Không có parse errors |
+| Docker image build | **Không đạt do Engine chưa hoạt động** | test-results/kv-docker-build.log |
+| Docker integration | **24 skipped**, không tính là passed | test-results/kv-docker-acceptance.xml |
 
-Production cuối: JS khoảng 459.28 KB (gzip 145.23 KB), CSS 55.36 KB (gzip 11.55 KB). Bundle SVG-only khoảng 262.04 KB JS (gzip 80.69 KB). Sau kiểm thử offline đã build lại bundle React Flow tiêu chuẩn; SVG fallback vẫn có sẵn trong bundle chuẩn.
+Sau build SVG đã build lại React Flow chuẩn. Source/backend legacy và launcher được so sánh byte với commit trước nâng cấp: 9 file Python legacy + start.bat/scripts/start.ps1 không thay đổi. API legacy được regression-test bằng process/HTTP thật. Có một PendingDeprecationWarning hiện hữu từ starlette/python_multipart; chưa đổi dependency backend.
 
-Toàn bộ 9 file Python backend được so sánh byte với test-results/reference-before.zip: không thay đổi. API, thuật toán, process management, persistence và fault injection giữ nguyên. Backend có một PendingDeprecationWarning hiện hữu từ starlette/python_multipart; không có lỗi test.
+## Những gì đã chứng minh bằng process thật
 
-## Browser coverage
+Acceptance mặc định khởi động **sáu Uvicorn process độc lập**, sáu địa chỉ HTTP và sáu thư mục SQLite riêng. Kill/start process thực, boot ID mới; không dùng TestClient giả lập node hoặc frontend animation làm bằng chứng.
 
-Các kiểm thử dùng HTTP/backend thật, không mock sự kiện hoặc kết quả:
+1. KV GET/PUT/INCREMENT và đọc trực tiếp worker.
+2. Lost response: hai attempts, một durable execution, counter tăng một; cùng request ID còn dedup sau restart.
+3. RPC worker bị kill, HTTP fail, gateway vẫn sống, dữ liệu còn sau boot mới.
+4. Multicast ba message tới ba receiver.
+5. B nhận #3 thiếu #2, NACK, retransmit từ history, FIFO deliver 1,2,3.
+6. Receiver kill/start và catch-up; catch-up cả sau step-mode run không bị kẹt gate cũ.
+7. 2PC COMMIT, A=90/B=110/C=transaction ID, đủ ACK và GET verified.
+8. NO → ABORT, không thay đổi một phần dữ liệu, không còn locks.
+9. Kill Coordinator sau PREPARED trước decision: gateway còn sống, ba node giữ PREPARED/locks, không tự quyết định. Restart authority → ABORT.
+10. Kill sau durable COMMIT và ACK A: B/C còn PREPARED, restart → replay cùng COMMIT.
+11. Participant restart trong PREPARED giữ khóa, nhận quyết định khi coordinator trở lại.
+12. Checkpoint inventory=100, redo -3/-2, kill/start, GET trực tiếp 95; hai entries replayed.
+13. Replay lần nữa vẫn 95, duplicate operation ID không cộng lại; nội dung khác cùng ID bị từ chối.
+14. Restart/recreate **process với cùng thư mục** giữ KV; đây chưa phải bằng chứng Docker volume.
+15. Gateway health phản ánh HTTP unavailable và API Docker lifecycle trả 403.
+16. Reset từ chối offline service hoặc PREPARED, không âm thầm xóa dữ liệu còn live.
+17. Stale expected value vote NO, request/transaction ID conflicts, direct PUT inventory bị chặn, CORS origin kiểm tra.
 
-- Tổng quan/process inspector/PID và cả bốn deep links.
-- RPC normal, lost response, retry/dedup, tắt dedup tạo hai lần thực thi, raw event JSON.
-- Multicast mất message tại B, retransmit chỉ recipient thiếu, delivery state, tìm kiếm journal.
-- 2PC crash Coordinator thật, ba participant PREPARED, BLOCKED, sequence khớp journal, resolve về COMMIT.
-- Recovery crash/restart với PID mới, checkpoint 10, replay hai operation, state sau recovery 20, operation log đánh dấu replay.
-- Run/Step/Reset, fault switches chọn scenario thật và loại trừ nhau, tốc độ 2× thực sự gửi pace_ms=300.
-- N/P/Esc sau click button; nhập N/P trong search không gây điều khiển protocol.
-- React Flow zoom/drag/inspect, SVG runtime và SVG-only, native dialog focus containment/restoration, reduced motion.
-- Light Mode cố định, các semantic text roles đạt contrast >=4.5:1 trên trắng và #F8FAFC.
-- Panel chính chỉ có một scenario select, bốn metric thực khớp API, timeline tối đa ba sự kiện, current status nhìn thấy ngay trong desktop 1672×940.
+## Browser thực
 
-## Đối chiếu trực quan
+Đã thao tác GET/PUT, chọn scenario, Run, Step/N, typed input không trigger N/P, presentation/Esc, drag/zoom/inspect React Flow, SVG, modal focus và replay. Replay ghi nhận **không có POST** mới. Kiểm tra cả năm workspace ở 375/768/1024/1440/1920px, không tràn ngang document.
 
-Đã mở xem ảnh RPC 1672px/1440px, Group, 2PC blocking và presentation, Recovery, SVG và mobile. Đã chỉnh các sai khác chính: số vùng bố cục, tỷ lệ sidebar/control panel, kích thước tiêu đề/node, màu ONLINE, đường request/response tách biệt, tách nhãn participant và tránh nhãn Recovery bị node che.
+kv-fault.spec.ts tạo sáu process riêng (hoặc opt-in Docker bằng KV_UI_DOCKER=1), thực sự dừng/restart Coordinator ở hai crash point, dừng/restart A để recovery, B để catch-up và rpc để kiểm tra counter giữ nguyên. Browser thấy BLOCKED, PREPARED, OFFLINE, boot ID mới, verified data. Những test này đang chạy **process mode**, nhãn UI ghi rõ không phải Docker.
 
-Ảnh minh chứng cục bộ:
-- test-results/reference-final-rpc-1672.png
-- test-results/reference-final-rpc-1440.png
-- test-results/reference-final-group.png
-- test-results/reference-final-recovery.png
-- test-results/reference-2pc-blocked.png
-- test-results/reference-2pc-presentation.png
-- test-results/reference-svg.png
-- test-results/reference-commit-{375,768,1024,1440,1920}.png
+Đã mở xem screenshot RPC, 2PC/presentation, BLOCKED và Recovery, đồng bộ vùng KV với layout sáng. Đã sửa HEALTH_DOWN thành màu lỗi, NACK là chờ, và dùng đúng service `rpc`/HTTP path `/kv` trong audit, không ghi nhầm participant A.
 
-Artifact, database thử nghiệm và node_modules không đóng vào release. Giá trị trong ảnh là kết quả run thật, không cố tái tạo các số 24/22/2/0 minh họa của thiết kế.
+Ảnh chính: test-results/kv-rpc.png, kv-group.png, kv-commit-presentation.png, kv-crash-before-decision.png, kv-crash-after-decision.png, kv-recovery-offline.png, kv-recovery-restarted.png, kv-rpc-restarted.png.
 
-## Chạy lại
+Các vòng trung gian đã phát hiện readiness reset trả 503 khi worker chưa lên đủ, test chờ group failure quá ngắn và một lỗi catch-up sau step mode; đã sửa và chạy lại. Có một lần Edge báo ERR_INSUFFICIENT_RESOURCES ở vòng legacy; vòng cuối cùng chạy lại sạch 18/18, không bật retry để che lỗi.
 
-Khởi động một instance lab riêng vì UI tests có Reset/crash/restart:
+## Docker: phần CHƯA được chứng minh
+
+Docker CLI 28.1.1, Compose 2.35.1 có sẵn. Đã thử khởi động Docker Desktop và build thật. Linux Engine pipe không tồn tại. Log Desktop ghi:
+
+`waiting for the VM setup to be ready ... listing WSL distros ... wsl.exe -l -v --all: context deadline exceeded`
+
+Build trả exit 1 ở kết nối dockerDesktopLinuxEngine. Không tự reset WSL/unregister distribution hoặc xóa Docker data vì có thể ảnh hưởng ứng dụng khác.
+
+Compose đã được kiểm tra có đúng sáu services/volumes riêng, loopback host ports, health checks, internal network và không Docker socket. Nhưng **chưa xác minh** image build Linux, DNS/HTTP trên Docker network, UID/permission volume, container health/start/kill/recreate và dữ liệu tồn tại qua Docker volume. Không suy ra chúng thành công từ process tests.
+
+Khi Engine hoạt động:
 
 ```powershell
-$env:LAB_PORT='9900'
-$env:LAB_DATA="$PWD\test-results\manual-ui"
-python -m backend
-```
-
-Ở terminal khác:
-
-```powershell
-python -m pytest tests -q
+.\scripts\kv-demo.ps1 -Action up
+$env:KV_TEST_MODE='docker'
+python -m pytest tests/test_kv_lab.py -q
+Remove-Item Env:KV_TEST_MODE
 cd frontend
-npm run typecheck
-npm run build
-$env:LAB_UI_URL='http://127.0.0.1:9900'
-npx playwright test
-
-# SVG-only regression:
-npm run build:offline
-npx playwright test lab.spec.ts
-# Trả về bundle chuẩn:
-npm run build
+$env:LAB_UI_URL='http://127.0.0.1:19000'
+$env:KV_UI_DOCKER='1'
+npx playwright test --config playwright.kv.config.ts
+Remove-Item Env:KV_UI_DOCKER
 ```
 
-Trong môi trường NVM Windows hiện tại đã dùng NODE_OPTIONS=--preserve-symlinks --preserve-symlinks-main. Kiểm thử dùng port 9900 và dữ liệu riêng, không reset hoặc restart phiên người dùng ở port 8000.
+Docker tests chỉ điều khiển project kv-transaction-lab, có reset data/crash/recreate nhưng không down -v. Cần nghiệm thu lại tất cả 24 case, đặc biệt recreate volume và hai crash point Coordinator.
 
-## Giới hạn và triển khai
+## Giới hạn và bàn giao
 
-Web local được kiểm tra HTTP 200, deep link /rpc và SSE trực tiếp tại port 8000. Trạng thái fault của phiên người dùng được giữ; frontend hiển thị đúng các node đang offline. Windows start.bat/scripts/start.ps1 không thay đổi.
+Local classroom/trusted demo; KV gateway chưa có auth để public Internet. Một coordinator authority/volume, một phiên demo; không HA/consensus/Byzantine, không distributed snapshot, không 3PC hoặc atomic multicast. Global read snapshot không được bảo đảm trong lúc phân phối COMMIT. Journal/history dành cho quy mô lớp học, chưa có retention/pagination production.
 
-Chưa triển khai cloud/Internet hoặc kiểm chứng TLS/OIDC/nginx trên máy chủ. Cấu hình hiện có ở DEPLOYMENT.md được giữ; public deployment cần authenticated gateway, demo allowlist và private worker ports. Một supervisor là một phiên demo dùng chung; không multi-tenant/HA. Static hosting không chạy thay các Python worker.
+Release được tạo từ source và bundle chuẩn, kiểm tra CRC/source matches. Không kèm node_modules, database, .env riêng, credential, dự án Raft tham khảo hoặc artifact thử nghiệm. Các report/screenshot chỉ ở workspace; kết quả đã tóm tắt trong tài liệu đóng gói. Không có cloud deployment.
 
-Pause có hiệu lực trước hành động kế tiếp; không ngắt HTTP/ghi đang thực hiện. Presentation Mode không tự bật fullscreen trình duyệt; dùng F11. Reliable multicast không có atomic/total-order agreement. Recovery là logical redo logging cục bộ.
 
-Release được tạo bằng scripts/package.py; kiểm tra CRC, source và production bundle khớp workspace, loại trừ database, secrets và node_modules.
+## Đối chiếu HTTP và SQLite trực tiếp
+
+Đã chạy lại lost-response trên host preview: HTTP result attempts=2, actual_executions=1; GET counter=1. Truy vấn trực tiếp SQLite RPC cho counter=1, journal RPC_EXECUTED của run đúng một dòng, dedup lưu cached result=1. SQLite của node A trong browser fault harness cho checkpoint=100, hai redo -3/-2 và inventory=95 sau restart. Artifact: test-results/kv-data-verification.json. Đây là bằng chứng host storage, không phải Docker volume.
+
+Chỉ báo thiếu sequence trên dashboard được suy ra từ received rows thực của receiver, không tự tạo success. Kết quả global verified vẫn do backend HTTP verification quyết định. Sau khi bổ sung chỉ báo này, browser multicast được chạy lại riêng và đạt (test-results/kv-multicast-final.json); cả hai production builds cũng được tạo lại.

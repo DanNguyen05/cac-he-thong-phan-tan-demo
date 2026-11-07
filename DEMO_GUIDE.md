@@ -1,180 +1,120 @@
-# Kịch bản trình bày trên lớp
+# Demo 8–10 phút — Distributed KV Transaction Lab
 
-## Chuẩn bị (trước giờ học)
+## Chuẩn bị
 
-1. Chạy `setup.bat` một lần khi có mạng. Chạy `start.bat`; mở http://127.0.0.1:8000.
-2. Kiểm tra Tổng quan có **5 tiến trình**: Supervisor, Coordinator, A/B/C. Nhấn Node A: PID khác Coordinator, có database riêng.
-3. Giữ cửa sổ terminal Supervisor để Ctrl+C dừng lab sau buổi học. Không refresh tab để reset: refresh chỉ kết nối lại trạng thái backend.
-4. Chạy thử `python -m pytest tests -q`. Test dùng port/database riêng, không tác động lab trình bày.
-5. Dùng trình duyệt zoom 100%, màn hình ít nhất 1280×800; **nút Trình chiếu** bật trình chiếu, **Esc** thoát. Nếu bundle có nhãn `SVG`, các giao thức vẫn chạy thật; chỉ renderer khác React Flow của build tiêu chuẩn.
+1. Docker Desktop Linux Engine phải hoạt động. Chạy `.\scripts\kv-demo.ps1 -Action up`.
+2. `docker compose -p kv-transaction-lab ps --all`: sáu service healthy. Mở http://127.0.0.1:19000/rpc, nhãn **Docker**.
+3. `.\scripts\kv-demo.ps1 -Action reset`, `-Action verify`: counter=0, balance A/B=100, inventory=100. Không dùng down -v.
+4. Giữ PowerShell ở thư mục dự án để CLI stop/start. Browser zoom 100%, nút Trình chiếu/F11, Esc thoát.
+5. Nếu UI ghi **Process · không phải Docker**, đang dùng host runner; không trình bày đó là container nghiệm thu. Xem VERIFICATION.md để biết bằng chứng đã chạy.
 
-Trình tự khuyến nghị: **Tổng quan (1 phút) → RPC (4 phút) → multicast (3 phút) → 2PC (5 phút) → recovery (3 phút)**. Dùng Auto để chạy nhanh; Từng bước khi cần hỏi cả lớp trước một hành động.
+## 0:00–0:45 — Kiến trúc và KV thật
 
-## Giao diện demo mới
+Tổng quan cho thấy gateway/coordinator/rpc/A/B/C. Mỗi node riêng process/database/volume. Mở GET/PUT, node rpc, key `hello`, value `world`, nhấn Ghi KV rồi GET. Đọc trực tiếp bằng HTTP hoặc `/state`. Chỉ gateway được browser dùng; dừng coordinator không làm chết trang.
 
-Luồng chính: **Chọn kịch bản → Chạy thí nghiệm → Xem sơ đồ → Quan sát kết quả**.
+## 0:45–2:00 — 8.3 RPC
 
-Panel bên phải chỉ có kịch bản, Chạy, Từng bước, Đặt lại, tốc độ, fault mode và trạng thái. Chọn **Từng bước** trước khi nhấn Chạy; sau đó dùng **Bước tiếp / N**. Khi auto đang chạy, nút chính chuyển thành **Tạm dừng / Tiếp tục**; phím **P** có cùng tác dụng. Tốc độ **0.5× / 1× / 2×** lần lượt là 1200 / 600 / 300 ms giữa các hành động.
+- Chọn **Mất phản hồi + retry**, Run.
+- Chỉ rõ cùng request ID: server đã commit, app client bỏ response, timeout, retry.
+- Kết quả **2 attempts / 1 executions**, counter tăng đúng 1. Con số lấy từ actual execution log và HTTP GET.
 
-**Cài đặt** (bánh răng trên header) chứa retry/dedup, node gây lỗi, max attempts, transport delay, chọn React Flow/SVG, export và trạng thái chi tiết. **Xem tất cả** mở journal đầy đủ để search/filter/inspect. Nút thông tin ở sơ đồ 2PC mở sequence. Timeline chính chỉ giữ ba sự kiện quan trọng; mọi chỉ số lấy từ backend.
+```powershell
+Invoke-RestMethod http://127.0.0.1:19002/kv/counter
+.\scripts\kv-demo.ps1 -Action stop -Service rpc
+# Dashboard vẫn sống, rpc health đỏ. GET qua gateway trả 503.
+.\scripts\kv-demo.ps1 -Action start -Service rpc
+Invoke-RestMethod http://127.0.0.1:19002/kv/counter
+```
 
-## Điều khiển chung
+Giải thích: chống thực thi trùng trong phạm vi stable ID + durable dedup; không khẳng định exactly-once tổng quát. Lost response là fault tầng ứng dụng; stop service là lỗi process/container thật. Trước demo kế tiếp hãy chờ mọi health xanh; không auto restart trong dashboard.
 
-- Chọn module bên trái → chọn kịch bản → chọn Từng bước nếu cần → **Chạy thí nghiệm**.
-- Step mode dừng **trước hành động backend**. **Bước tiếp / N** cho phép một hành động, có thể phát sinh nhiều event HTTP. Trước Next đầu tiên, server chưa thực thi.
-- Nhấn node để xem JSON state và PID. Nhấn dòng timeline hoặc mũi tên sequence diagram để xem event gốc. Trong Xem tất cả, tab Thông điệp hiển thị message ID và attempt; Nhật ký node đọc local durable logs.
-- Màu xanh lá: thành công; vàng: chờ/PREPARED/timeout; đỏ: lỗi/ABORT; xanh dương: giao tiếp.
-- Kịch bản hoàn tất có thể chạy kịch bản mới ngay; node tự làm sạch. Run blocking/pending cần phục hồi hoặc Reset trước.
-- Để gây lỗi thủ công trong lúc protocol chạy: chọn Từng bước, Chạy thí nghiệm, mở node inspector để crash/unavailable, rồi Next. Lỗi đặt trước khi Chạy thí nghiệm sẽ bị thao tác làm mới node của kịch bản xóa đi.
-- **Reset xóa dữ liệu của cả phòng lab, gồm PREPARED.** Nó không chứng minh tính đúng đắn của recovery và không phải giao thức ABORT. Chỉ dùng để chạy lại thí nghiệm một cách chủ ý.
-- Xuất snapshot JSON trong Cài đặt để lưu kết quả. Timeline chỉ giữ 600 event mới nhất trong snapshot.
+## 2:00–3:00 — 8.4 NACK/FIFO
 
-## 8.3 — Reliable Client–Server Communication
+Chọn **B mất #2 → NACK → truyền lại**, Run. B nhận #1 rồi #3, chưa deliver #3; gửi NACK [2]. Sender đọc history và gửi HTTP #2. Cuối cùng A/B/C deliver **1 · 2 · 3**. Xem tất cả → lọc NACK/RETRANSMIT; JSON có source B, target, stream và sequence.
 
-### A. Bình thường
+Nhấn mạnh: reliable FIFO trong nhóm cố định, không phải atomic multicast/total order.
 
-1. Chọn **Client–Server → Giao tiếp bình thường**; giữ retry + dedup bật.
-2. Chọn Từng bước, Chạy thí nghiệm. Server execution count vẫn 0.
-3. Nhấn Next. Quan sát SEND → DELIVERED → ACK, request ID, attempt 1, counter 1, kết quả thành công.
+Nếu có thời gian, stop participant-b trước Run; kết quả PARTIAL chỉ rõ B. Start B, nhấn **Catch-up Node B** để lấy history, kiểm chứng đủ sequence. Không giả vờ receiver offline đã nhận.
 
-Giải thích: RPC Client chạy trong process Coordinator, POST tới Node A. Web UI chỉ điều khiển và quan sát.
+## 3:00–4:00 — 8.5 COMMIT và ABORT
 
-### B. Mất request
+Chọn **Chuyển 10: A → B**, Run. PREPARE → YES → durable COMMIT → ACK. A=90, B=110, C=transaction ID. Global result chỉ verified khi đủ ACK + GET.
 
-1. Chọn **Mất yêu cầu**, Auto, số lần thử 3; Chạy thí nghiệm.
-2. Quan sát REQUEST_LOST → TIMEOUT → RETRY, cùng request ID, attempt 2.
-3. Server counter cuối = **1**, không phải 2: request đầu bị loại trước khi tới server.
+Reset khi mọi service sống, rồi **B bỏ phiếu NO**, Run. Decision ABORT, A/B vẫn 100, C vẫn none; locks giải phóng. COMPLETED không đồng nghĩa COMMIT.
 
-### C. Mất response — điểm nhấn của phần RPC
+## 4:00–6:30 — Trọng tâm: crash sau PREPARED
 
-1. Chọn **Mất phản hồi**, **tắt Khử trùng lặp**, giữ retry; Chạy thí nghiệm.
-2. Node đã thực thi ở lần 1, response bị loại; client timeout và retry.
-3. Server counter cuối = **2**. Một ý định client đã thực thi hai lần.
-4. Bật lại dedup, chạy cùng kịch bản. Counter cuối = **1**, event DUPLICATE_SUPPRESSED; client nhận lại result bền vững.
-5. Tắt retry và chạy Mất phản hồi: run FAILED nhưng server counter = **1**. Thất bại tại client không đồng nghĩa thao tác chưa xảy ra.
+1. Reset, chọn **Dừng sau PREPARED**, Run tự dừng tại `PAUSED_AFTER_PREPARE`.
+2. Node A/B/C **PREPARED**, proposed writes chưa vào KV, balances vẫn 100. Coordinator decision còn null.
 
-Câu hỏi cho lớp: “Client nhìn thấy timeout có suy ra server chưa thực thi được không?” Đáp án: không. At-most-once không bảo đảm thành công; at-least-once cần eventual delivery. Không có lời khẳng định exactly-once tổng quát.
+```powershell
+Invoke-RestMethod http://127.0.0.1:19001/state | ConvertTo-Json -Depth 12
+.\scripts\kv-demo.ps1 -Action stop -Service coordinator
+docker compose -p kv-transaction-lab ps --all
+```
 
-### D. Server unavailable, delay và duplication
+3. Coordinator thực sự stopped; trang vẫn cập nhật. Participant PREPARED, **BLOCKED**, key balance locked. Không participant nào tự chọn COMMIT/ABORT.
+4. Có thể thử PUT balance tại A: 409. Đọc balances vẫn 100.
 
-- **Server không khả dụng**: Node A sống, health đọc được, protocol trả 503; client kết thúc sau retry budget, counter 0.
-- **Phản hồi chậm**: transport trì hoãn ít nhất 1000 ms, vượt deadline mặc định 650 ms; timeout trước khi gửi HTTP ở attempt đầu, retry thành công. Tên kịch bản mô tả sự chậm mà client thấy; implementation cụ thể là delay trước HTTP.
-- **Nhân đôi thông điệp**: hai HTTP POST cùng ID; dedup bật → 1 execution, tắt → 2 executions.
+```powershell
+.\scripts\kv-demo.ps1 -Action start -Service coordinator
+.\scripts\kv-demo.ps1 -Action verify
+```
 
-## 8.4 — Reliable Group Communication
+5. Boot ID mới, Coordinator đọc log. **Chưa có durable decision → ABORT**, gửi A/B/C, unlock, GET A/B=100. Đây là recovery của authority sau restart; timeout ở participant không tự giải quyết blocking.
 
-### A. Tất cả nhận
+## 6:30–7:30 — Crash sau durable COMMIT
 
-1. Chọn **Group Communication → Tất cả nhận thành công**, Auto; Chạy thí nghiệm.
-2. ACK A/B/C, delivery count mỗi node = **1**. Sender gửi cùng message ID cho ba thành viên.
+Reset, chọn **Dừng sau durable COMMIT**, Run. Điểm dừng: COMMIT đã ghi disk, A đã nhận (90), B/C còn PREPARED. Global chưa verified.
 
-### B. Mất một message và truyền lại
+```powershell
+.\scripts\kv-demo.ps1 -Action crash -Service coordinator
+.\scripts\kv-demo.ps1 -Action start -Service coordinator
+```
 
-1. Chọn **Mất thông điệp tại một node**, target **B**, max attempts 3.
-2. Bỏ lỡ B ở vòng đầu. A/C nhận và ACK ngay.
-3. Quan sát RETRANSMIT **chỉ tới B**. Cuối cùng delivery count đều 1.
-4. Lọc timeline từ khóa `RETRANSMIT` để chỉ rõ recipient.
+Recovery phát lại **cùng COMMIT**, không đổi ABORT: B=110, C=transaction ID, tất cả ACK. So sánh hai crash points để giải thích vai trò durable decision.
 
-### C. Duplicate và thành viên lỗi
+## 7:30–9:00 — 8.6 Recovery 100 → 95
 
-- Chọn **Gửi lặp thông điệp**, target B: transport POST hai lần; B chỉ giao một lần, event DUPLICATE_SUPPRESSED.
-- Chọn **Một thành viên không khả dụng**, target C: A/B nhận, C không ACK; run PARTIAL, `missing=[C]`. Không làm giả thành công cho toàn nhóm.
+Chọn **Crash container → recovery 95**, Run. Setup inventory=100, checkpoint 100, ghi redo -3/-2 → 95. Chờ lời nhắc crash/restart, không chỉ nhấn animation.
 
-Giới hạn: ACK + retransmit hữu hạn, nhóm cố định, chưa có atomic agreement hay total order. Atomic multicast cần bảo đảm agreement và ordering phù hợp, không chỉ gửi thông điệp giống nhau. Node đã nhận không rollback vì node khác chưa nhận. Sender crash không được tự phục hồi multicast round trong bản demo.
+```powershell
+Invoke-RestMethod http://127.0.0.1:19003/kv/inventory
+.\scripts\kv-demo.ps1 -Action crash -Service participant-a
+docker compose -p kv-transaction-lab ps --all
+.\scripts\kv-demo.ps1 -Action start -Service participant-a
+Invoke-RestMethod http://127.0.0.1:19003/state | ConvertTo-Json -Depth 12
+Invoke-RestMethod http://127.0.0.1:19003/kv/inventory
+```
 
-## 8.5 — Distributed Commit
+Node boot ID đổi, recovery report checkpoint=100, replay đúng hai operation, **inventory=95**. Trong Cài đặt → Trạng thái & nguyên lý xem operation nào replay.
 
-### A. Commit
+```powershell
+Invoke-RestMethod -Method Post -Body '{}' -ContentType application/json http://127.0.0.1:19003/recover
+Invoke-RestMethod -Method Post -Body '{}' -ContentType application/json http://127.0.0.1:19003/recover
+# Cả hai vẫn 95, không cộng lại delta lên state hiện tại.
+```
 
-1. Chọn **Distributed Commit → Tất cả bỏ phiếu YES**, Từng bước.
-2. Chạy thí nghiệm, nhấn Next 3 lần: từng participant ghi PREPARED rồi VOTE YES. Counter commit vẫn 0.
-3. Coordinator ghi durable COMMIT; Next các bước phase 2 để phân phối quyết định.
-4. Kết thúc, A/B/C đều COMMIT, số dư từng node = **10**. Sequence diagram thể hiện thông điệp có thật, nhấn mũi tên để kiểm tra JSON.
+Checkpoint này cục bộ, không phải consistent distributed snapshot. SQLite WAL và logical redo là hai tầng khác nhau.
 
-Ghi chú: durable-decision event có thể xuất hiện ngay sau bước PREPARE cuối trước khi chờ Next phân phối quyết định. Step boundary là hành động giao thức, không phải từng dòng log riêng.
+## 9:00–10:00 — 8.7 Kết luận và bằng chứng
 
-### B. NO → abort
+Đối chiếu Docker ps, HTTP GET, durable journal/SQLite và UI. Replay log có nhãn **REPLAY**, chỉ phát lại sự kiện cũ; không chạy thí nghiệm mới. Tóm tắt: dedup không phải general exactly-once; ACK/NACK không phải atomic multicast; 2PC có blocking; recovery đúng cần log/checkpoint bền vững.
 
-1. Chọn **Một thành viên bỏ phiếu NO**, target B, Auto.
-2. B ghi ABORT cục bộ và trả NO. Coordinator ghi global ABORT rồi gửi A/B/C.
-3. Cả ba ABORT, bộ đếm vẫn **0**. Run COMPLETED có nghĩa protocol đã kết thúc đúng, không có nghĩa quyết định COMMIT.
+## Tình huống bổ sung và phục hồi môi trường
 
-### C. Participant chết trước vote
-
-1. Chọn **Participant chết trước khi bỏ phiếu**, target B, Auto.
-2. PID B bị terminate thật, HTTP PREPARE thất bại, phiếu B = MISSING.
-3. Coordinator ghi ABORT, A/C áp dụng; B chưa ACK → DECISION_PENDING.
-4. Nhấn **Khởi động & phục hồi**: B có PID mới, nhận cùng ABORT; tất cả cùng ABORT, run COMPLETED.
-
-### D. Coordinator chết sau PREPARE — tình huống chính
-
-1. Chọn **Coordinator chết sau PREPARE**, Auto (hoặc bước qua ba PREPARE rồi bước crash).
-2. Sau VOTE YES của A/B/C, Coordinator gọi `os._exit(86)` **trước durable decision**.
-3. UI vẫn cập nhật vì Supervisor còn sống. Coordinator đỏ, cả ba participant **PREPARED** màu vàng, bộ đếm = 0, transaction state PREPARING, run BLOCKED.
-4. **Dừng trình bày 10–20 giây để cả lớp thấy không có timer tự ABORT.** PREPARED không đổi.
-5. Nhấn từng node, chỉ ra durable transaction state và PID vẫn sống.
-6. Nhấn **Khởi động & phục hồi**. Coordinator PID mới đọc đủ ba YES đã lưu; ghi COMMIT bền vững và phân phối. Các node COMMIT, counter 10.
-
-Điểm lý thuyết: PREPARED participant không biết liệu COMMIT đã được ghi hoặc gửi nơi khác. Tự ABORT vì timeout có thể phá atomicity. Phục hồi ở đây do **Coordinator có thẩm quyền** đọc nhật ký bền vững; không phải participant tự thoát blocking bằng timeout.
-
-## 8.6 — Recovery
-
-### A–B. State và checkpoint
-
-1. **Recovery → Ghi trạng thái bền vững**: hai operation `+5,+5`, state = **10**, journal có 2 operation.
-2. **Tạo checkpoint**: snapshot `(value=10, seq=2)`. Nhấn Node A xem `checkpoint` và `operations`.
-
-### C–E. Operation sau checkpoint, crash, restart và replay
-
-1. Chọn **Crash → checkpoint + redo**, Từng bước, Chạy thí nghiệm.
-2. Hai bước đầu: +5, +5 → 10.
-3. Bước 3: checkpoint tại value 10, seq 2.
-4. Bước 4–5: +7, +3 → **20**, checkpoint vẫn 10.
-5. Bước 6: crash Node A. Node đỏ, không có counter live; file SQLite vẫn còn.
-6. Bước 7: restart. PID đổi; boot report: checkpoint 10, replay 2 operations sau seq 2 → **20**.
-7. So sánh `before`, `after`, `before_pid`, `after_pid` trong kết quả.
-
-### F. Idempotence
-
-1. Chọn **Phát lại nhiều lần**, Auto.
-2. Sau recovery, gọi recover một lần nữa, rồi gửi lại operation ID số 4.
-3. State vẫn **20**, journal vẫn **4 operation**, duplicate=true. Event IDEMPOTENCE chứa cả hai bằng chứng.
-
-Phương pháp: **checkpoint + local logical redo logging** trên stable storage. SQLite bảo vệ atomic write của operation và counter. Replay chạy từ snapshot, không cộng lại trên state hiện tại. Không phải distributed checkpoint đồng bộ, không phục hồi ổ đĩa đã mất và không message logging mọi gói mạng.
-
-## Câu hỏi giảng viên có thể hỏi
-
-| Câu hỏi | Trả lời dựa trên implementation |
-|---|---|
-| Node có thực sự riêng process? | Có. So sánh PID/port trong inspector hoặc `/api/health`; mỗi child là Uvicorn riêng, state SQLite riêng. |
-| Mất request/response là mất packet OS? | Không. Lỗi xác định ở wrapper transport ứng dụng. Request drop trước HTTP; response drop sau node đã thực thi. |
-| Retry có exactly-once không? | Không. ID/result bền vững + atomic mutation cung cấp at-most-once trong phạm vi lưu ID. Client vẫn có thể không biết kết quả. |
-| Dedup result và cập nhật bị crash ở giữa thì sao? | Chúng nằm trong cùng SQLite transaction; cả hai cùng commit hoặc cùng rollback, theo giả định durable SQLite. |
-| ACK mất thì có duplicate delivery không? | Retry cùng message ID bị UNIQUE receipt chặn. Thí nghiệm duplicate minh họa cơ chế này; không có kịch bản riêng mất ACK multicast. |
-| Đây có phải atomic multicast? | Không; không consensus, total order hoặc all-or-none delivery agreement. |
-| 2PC có non-blocking không? | Không. Kịch bản Coordinator crash giữ PREPARED tới khi Coordinator phục hồi. |
-| Participant NO có thể ABORT ngay không? | Có: nó chưa hứa COMMIT, ghi local NO/ABORT; Coordinator sau đó quyết định global ABORT. |
-| Coordinator thiếu một vote có thể abort không? | Có, nếu chưa có durable COMMIT. Participant đã PREPARED phải đợi quyết định của Coordinator. |
-| Crash sau durable COMMIT nhưng chưa gửi hết? | `/resolve` đọc cùng COMMIT và gửi lại; participant áp dụng idempotent. Không thay bằng ABORT. |
-| Process restart khác reset thế nào? | Restart giữ DB và phục hồi; reset xóa state quản trị để tạo lab mới. |
-| Replay lặp tại sao không tăng gấp đôi? | Dựng lại từ snapshot + suffix log; operation ID UNIQUE ngăn ghi lặp khi client gửi lại. |
-| GUI có tự suy luận node đã commit không? | Không. State qua HTTP; sequence/timeline từ journal. Snapshot có độ trễ poll, không atomic toàn hệ thống. |
-| Có chịu Byzantine/network partition thật không? | Không. Mô hình crash/unavailable + transport faults xác định, không triển khai Byzantine consensus hay OS partition. |
-| Nếu Supervisor chết? | Đây là control plane ngoài protocol; không có HA cho Supervisor. Dừng sạch bằng Ctrl+C để thu hồi child processes. |
-
-## Kết thúc
-
-Xuất snapshot nếu cần. Reset là tùy chọn. Nhấn Ctrl+C ở terminal Supervisor để dừng lab; state trên ổ đĩa giữ nguyên cho lần khởi động sau, trừ khi đã reset.
+- Participant PREPARED crash: scenario tương ứng, chờ PREPARED, stop participant-b, nhấn Bước tiếp. Coordinator ghi COMMIT, DECISION_PENDING; start B, nó giữ PREPARED từ volume rồi nhận COMMIT retry.
+- Recreate volume proof: PUT key `proof`, `docker compose -p kv-transaction-lab up -d --no-deps --force-recreate participant-a`, chờ health, GET proof vẫn còn. Không xóa volume.
+- Nếu còn in-doubt tx: start tất cả service, chờ coordinator recovery/ACK; Reset từ chối heuristic xóa PREPARED. Nếu HTTP offline, xác minh Docker ps/logs trước.
+- Kết thúc: `.\scripts\kv-demo.ps1 -Action down` giữ volumes. Lần sau up rồi Reset chủ động khi các tx đã hoàn tất.
+- Docker/WSL chưa hoạt động: không tuyên bố demo container thành công. Có thể chạy host mode để chứng minh logic, nhưng nghiệm thu Docker volume/network vẫn còn riêng.
 
 
-## Điều khiển Control Center v2
+## Doi chieu SQLite trong dung container
 
-N chạy bước tiếp khi backend WAITING. P tạm dừng/tiếp tục auto; chế độ từng bước dùng N. Nút Trình chiếu mở bố cục lớn, Esc thoát hoặc đóng inspector. Tạm dừng chỉ có hiệu lực tại ranh giới hành động để không ngắt giữa thao tác ghi.
+```powershell
+docker compose -p kv-transaction-lab exec -T participant-a python -c "import sqlite3; c=sqlite3.connect('/data/kv-A.sqlite'); print(c.execute('SELECT key,value FROM kv').fetchall()); print(c.execute('SELECT * FROM checkpoints').fetchall()); print(c.execute('SELECT * FROM redo ORDER BY lsn').fetchall())"
+docker compose -p kv-transaction-lab exec -T coordinator python -c "import sqlite3; c=sqlite3.connect('/data/kv-coordinator.sqlite'); print(c.execute('SELECT id,phase,decision,votes,acks FROM distributed_tx').fetchall())"
+```
 
-Tốc độ thực thi (0.5× / 1× / 4×) điều chỉnh khoảng nghỉ giữa các hành động. Độ trễ transport là một cấu hình lỗi độc lập. Thông điệp chỉ sáng khi có sự kiện thực từ journal. Khi mất SSE, kết nối được đánh dấu mất; counter không được dựng giả.
-
-Trong 2PC, quan sát PREPARE → DECISION → ACK và ba trạng thái participant. Khi Coordinator crash, cả ba PREPARED giữ khóa; banner BLOCKED giải thích vì sao không được tự ABORT. Chọn Khởi động & phục hồi để resolve.
-
-Trong Recovery, đọc CHECKPOINT, TRƯỚC CRASH, STATE HIỆN TẠI và các dòng “Đã replay” trong durable operation log. Màu replay dựa trên report do node trả về.
-
-SVG dự phòng vẫn dùng cùng API, cùng scenario và dữ liệu. Chuyển renderer không chạy lại hay phát lại giao thức. Có thể thử `/commit?renderer=svg` trước buổi trình bày.
+Cac lenh tren la buoc nghiem thu Docker thu cong khi Engine hoat dong; chua duoc bao la da chay trong moi truong Engine loi. Journal ben vung nam trong bang journal cua tung database. So sanh time/run_id/transaction ID voi HTTP /state va UI.
