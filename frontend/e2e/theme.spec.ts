@@ -36,7 +36,7 @@ test('light palette has readable text, status colors, code blocks and inspector'
       }))
   })
   for (const pair of contrasts) expect(pair.ratio, JSON.stringify(pair)).toBeGreaterThanOrEqual(4.5)
-  await page.locator('.service-node').filter({ hasText: 'Node A' }).click()
+  await page.locator('.topology-page:not([hidden]) .service-node').filter({ hasText: 'Node A' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
   expect(await dialog.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(255, 255, 255)')

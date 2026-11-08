@@ -1,5 +1,7 @@
 # Distributed KV Transaction Lab
 
+Hướng dẫn nói và thao tác demo 8–10 phút: [HUONG_DAN_THUYET_TRINH.md](HUONG_DAN_THUYET_TRINH.md). File phân biệt rõ Process mode dự phòng và Docker mode cần nghiệm thu, kèm lệnh gây lỗi, kết quả dự kiến và câu hỏi thường gặp.
+
 Đồ án Chương 8, mục **8.3–8.7**, *Distributed Systems, 4th Edition* — van Steen & Tanenbaum. Nâng cấp Fault Tolerance Lab hiện có; giữ chế độ Python legacy, không triển khai Raft/Paxos.
 
 **HTTP thật → xử lý độc lập → lỗi thật → recovery đúng → đọc lại dữ liệu.**

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Box, CheckCircle2, ChevronRight, CircleHelp, Download, Gauge, Info, LayoutDashboard, Maximize2, Minimize2, Pause, Play, RefreshCw, Settings, SkipForward, Target, X, Zap } from 'lucide-react'
 import type { Module } from './types'
 import { tone } from './types'
@@ -37,12 +37,12 @@ export default function App() {
   const isKV = state.runtime?.mode === 'kv'
   const serviceCount = state.runtime?.services || 4
   const healthy = connected && lab.liveCount === serviceCount
-  const externalWait = isKV && ['AWAIT_CONTAINER_RESTART', 'AWAIT_RPC_STOP', 'AWAIT_RECEIVER_STOP'].includes(String(display.run?.result?.stage))
+  const externalWait = lab.running && isKV && ['AWAIT_CONTAINER_RESTART', 'AWAIT_RPC_STOP', 'AWAIT_RECEIVER_STOP'].includes(String(display.run?.result?.stage))
   const faultList = page === 'overview' ? [] : isKV && page === 'commit' ? [{ id: 'vote_no', label: 'Một phiếu NO' }, { id: 'coordinator_crash', label: 'Dừng sau PREPARED' }, { id: 'coordinator_after_commit', label: 'Dừng sau ghi COMMIT' }] : faults[page]
   const canConfigure = !lab.running && !lab.unresolved && !lab.busy
   const open = (next: typeof pane) => { setPane(next); lab.setHelp(true) }
   const close = () => { lab.setHelp(false); lab.setInspectNode(null); lab.setInspectEvent(null) }
-  const inspect = (id: string) => lab.setInspectNode(['checkpoint', 'log'].includes(id) ? 'A' : isKV && page === 'rpc' && id === 'A' ? 'rpc' : isKV && ['rpc', 'group', 'recovery'].includes(page) && id === 'coordinator' ? 'gateway' : isKV && id === 'web' ? 'gateway' : id)
+  const inspect = useCallback((id: string) => lab.setInspectNode(['checkpoint', 'log'].includes(id) ? 'A' : isKV && page === 'rpc' && id === 'A' ? 'rpc' : isKV && ['rpc', 'group', 'recovery'].includes(page) && id === 'coordinator' ? 'gateway' : isKV && id === 'web' ? 'gateway' : id), [isKV, page, lab.setInspectNode])
   const runLabel = lab.canPause ? lab.paused ? 'Tiếp tục' : 'Tạm dừng' : 'Chạy thí nghiệm'
   const resultDecision = display.transactions[0]?.state
   const statusLabel = !connected ? 'Đang kết nối…' : !lab.current && state.run ? 'Có thí nghiệm đang giữ' :
@@ -102,6 +102,7 @@ export default function App() {
           <div className="control-section status-section"><div className={`current-status ${statusTone}`} role="status" aria-live="polite" data-testid="current-status"><h2><CheckCircle2 size={23} />Trạng thái hiện tại</h2><strong>{statusLabel}</strong>{status === 'BLOCKED' && <span>Participant giữ PREPARED</span>}{status === 'WAITING' && !externalWait && <span>Nhấn N hoặc Bước tiếp</span>}{externalWait && <span>Xem lệnh trong vùng KV</span>}</div>
             {lab.current && lab.unresolved && display.transactions.length > 0 && !isKV && <button className="button primary resolve-button" disabled={lab.busy || !connected} onClick={() => void lab.act('/resolve')}><RefreshCw size={21} />Khởi động & phục hồi</button>}
             {isKV && lab.unresolved && <p className="docker-hint">Khởi động service bằng CLI. Coordinator tự phục hồi durable log.</p>}
+            {status === 'INTERRUPTED' && !lab.unresolved && <p className="docker-hint" role="note">Lần chạy trước đã dừng. Chọn kịch bản rồi Chạy thí nghiệm để bắt đầu lại; dữ liệu KV vẫn được giữ.</p>}
             {!lab.current && state.run && <button className="text-button" onClick={() => lab.navigate(state.run!.module)}>Mở thí nghiệm đang giữ</button>}
           </div>
         </aside>}

@@ -61,7 +61,7 @@ test('browser reflects real before/after-decision crashes and inventory restart'
     await stop('coordinator')
     await expect(page.getByTestId('current-status')).toContainText('2PC đang blocking')
     await expect(page.locator('.timeline-symbol.red').first()).toBeVisible()
-    await expect(page.locator('.service-node .node-status').filter({ hasText: 'PREPARED' })).toHaveCount(3)
+    await expect(page.locator('.topology-page:not([hidden]) .service-node .node-status').filter({ hasText: 'PREPARED' })).toHaveCount(3)
     await page.screenshot({ path: '../test-results/kv-crash-before-decision.png', fullPage: true })
     await start('coordinator')
     await expect(page.getByTestId('current-status')).toContainText('Giao dịch đã ABORT')

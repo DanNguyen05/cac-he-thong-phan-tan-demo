@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@xyflow/react/dist/style.css'
 import { ReactFlow, Controls, Handle, Position, MarkerType, applyNodeChanges, BaseEdge, getSmoothStepPath } from '@xyflow/react'
 import type { Edge, EdgeProps, Node, NodeProps, NodeChange, ReactFlowInstance } from '@xyflow/react'
@@ -47,33 +47,58 @@ function MessageEdge(props: EdgeProps<Message>) {
     {data.active && <circle key={data.seq} className="message-pulse" r={6} fill={data.color}><animateMotion dur="0.8s" repeatCount="1" path={path} /></circle>}
   </>
 }
-const nodeTypes = { service: Service }
-const edgeTypes = { message: MessageEdge }
+const nodeTypes = { service: memo(Service) }
+const edgeTypes = { message: memo(MessageEdge) }
+const fitOptions = { padding: .1 }
+const proOptions = { hideAttribution: true }
 
-export default function ReactFlowDiagram({ page, state, onInspect }: { page: Page; state: Snapshot; onInspect: (id: string) => void }) {
+function createNodes(definitions: ServiceData[], compact: boolean): ServiceNode[] {
+  return definitions.map((data, index) => ({ id: data.id, type: 'service', data, width: 220,
+    position: compact ? { x: 0, y: index * 260 } : { x: data.x, y: data.y }, ariaLabel: `Kiểm tra ${data.title}` }))
+}
+
+export default function ReactFlowDiagram({ page, state, onInspect, active = true }: { page: Page; state: Snapshot; onInspect: (id: string) => void; active?: boolean }) {
   const container = useRef<HTMLDivElement>(null)
   const flow = useRef<ReactFlowInstance<ServiceNode, Message> | null>(null)
-  const [compact, setCompact] = useState(false)
-  const fresh = useFreshEvents(state)
+  const [compact, setCompact] = useState(() => window.innerWidth < 500)
+  const fresh = useFreshEvents(state, active)
   const definitions = useMemo(() => serviceData(page, state), [page, state])
-  const [nodes, setNodes] = useState<ServiceNode[]>([])
+  const [nodes, setNodes] = useState<ServiceNode[]>(() => createNodes(definitions, compact))
+  const layoutMode = useRef(compact)
+  const dimensions = useRef({ width: 0, height: 0 })
   useEffect(() => {
+    if (!active) return
     let frame = 0
     const observer = new ResizeObserver(entries => {
-      setCompact(entries[0].contentRect.width < 470)
+      const { width, height } = entries[0].contentRect
+      const previous = dimensions.current
+      if (!width || !height || (width === previous.width && height === previous.height)) return
+      dimensions.current = { width, height }
+      setCompact(width < 470)
+      if (!previous.width) return // Initial fitView already measures the new graph.
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => { void flow.current?.fitView({ padding: .1, duration: 0 }) })
     })
     if (container.current) observer.observe(container.current)
     return () => { observer.disconnect(); cancelAnimationFrame(frame) }
-  }, [page])
-  useEffect(() => { setNodes([]) }, [compact])
+  }, [page, active])
   useEffect(() => {
-    setNodes(previous => definitions.map(data => ({ id: data.id, type: 'service',
-      position: previous.find(node => node.id === data.id)?.position || (compact ? { x: 0, y: definitions.indexOf(data) * 260 } : { x: data.x, y: data.y }),
-      data, ariaLabel: `Kiểm tra ${data.title}`, width: 220,
-    })))
+    const changedLayout = layoutMode.current !== compact
+    layoutMode.current = compact
+    setNodes(previous => {
+      const updated = createNodes(definitions, compact).map(node => {
+        const old = previous.find(item => item.id === node.id)
+        if (!old) return node
+        const sameData = Object.keys(node.data).every(key => old.data[key] === node.data[key])
+        if (!changedLayout && sameData) return old
+        return { ...old, data: sameData ? old.data : node.data, position: changedLayout ? node.position : old.position }
+      })
+      return updated.length === previous.length && updated.every((node, index) => node === previous[index]) ? previous : updated
+    })
   }, [definitions, compact])
+  const initialize = useCallback((instance: ReactFlowInstance<ServiceNode, Message>) => { flow.current = instance }, [])
+  const changeNodes = useCallback((changes: NodeChange<ServiceNode>[]) => setNodes(current => applyNodeChanges(changes, current)), [])
+  const inspect = useCallback((_: unknown, node: ServiceNode) => onInspect(node.id), [onInspect])
   const edge = (id: string, source: string, target: string, label: string, color: string, seq: number, reverse = false, rpc = false): Message => ({
     id, source, target, type: 'message',
     sourceHandle: !compact && ['checkpoint', 'log'].includes(target) ? 'out-right' : rpc && !compact ? reverse ? 'out-left' : 'out-right' : reverse ? 'out-top' : 'out-bottom',
@@ -107,11 +132,11 @@ export default function ReactFlowDiagram({ page, state, onInspect }: { page: Pag
     }
   }
   return <div ref={container} className={`diagram ${page === 'overview' ? 'overview-diagram' : ''}`} data-renderer="reactflow">
-    <ReactFlow onInit={instance => { flow.current = instance }} key={String(compact)} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-      onNodesChange={(changes: NodeChange<ServiceNode>[]) => setNodes(current => applyNodeChanges(changes, current))}
-      onNodeClick={(_, node) => onInspect(node.id)} fitView fitViewOptions={{ padding: .1 }}
+    <ReactFlow id={`topology-${page}`} onInit={initialize} key={String(compact)} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+      onNodesChange={changeNodes}
+      onNodeClick={inspect} fitView fitViewOptions={fitOptions}
       minZoom={.25} maxZoom={1.6} colorMode="light" nodesConnectable={false} edgesReconnectable={false}
-      deleteKeyCode={null} proOptions={{ hideAttribution: true }}>
+      deleteKeyCode={null} proOptions={proOptions}>
       <Controls showInteractive={false} />
     </ReactFlow>
   </div>

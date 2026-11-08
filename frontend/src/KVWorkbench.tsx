@@ -6,7 +6,7 @@ import type { Page, Snapshot } from './types'
 export default function KVWorkbench({ state, page, onEdit, onCatchup }: { state: Snapshot; page: Page; onEdit: () => void; onCatchup: () => void }) {
   const result = state.run?.result
   const stage = String(result?.stage || result?.phase || '')
-  const external = ['PAUSED_AFTER_PREPARE', 'PAUSED_AFTER_COMMIT', 'AWAIT_CONTAINER_RESTART', 'AWAIT_RPC_STOP', 'AWAIT_RECEIVER_STOP'].includes(stage)
+  const external = ['RUNNING', 'WAITING'].includes(state.run?.status || '') && ['PAUSED_AFTER_PREPARE', 'PAUSED_AFTER_COMMIT', 'AWAIT_CONTAINER_RESTART', 'AWAIT_RPC_STOP', 'AWAIT_RECEIVER_STOP'].includes(stage)
   const names = page === 'rpc' ? ['rpc'] : page === 'recovery' ? ['A'] : ['A', 'B', 'C']
   const target = String(state.run?.config.target || 'B')
   const participantCrash = state.run?.scenario === 'participant_prepared'
@@ -16,7 +16,7 @@ export default function KVWorkbench({ state, page, onEdit, onCatchup }: { state:
   const catchup = Array.isArray(missing) ? String(missing[0] || target) : target
   return <div className="kv-workbench" data-testid="kv-workbench">
     <div className="kv-heading"><h3><Database size={20} />Dữ liệu KV thực</h3><div><span className={`badge ${state.runtime?.containerized ? 'blue' : 'amber'}`}>{state.runtime?.containerized ? 'Docker' : 'Process · không phải Docker'}</span><button className="text-button" onClick={onEdit}>GET / PUT</button></div></div>
-    {external && <div className="external-fault" role="status"><strong>{stage === 'PAUSED_AFTER_PREPARE' ? participantCrash ? `PREPARED · dừng Participant ${target}, rồi Bước tiếp` : 'PREPARED · chưa ghi quyết định' : stage === 'PAUSED_AFTER_COMMIT' ? 'COMMIT bền vững · B/C chưa nhận' : stage === 'AWAIT_CONTAINER_RESTART' ? 'Đang chờ crash và restart Node A thật' : stage === 'AWAIT_RECEIVER_STOP' ? `Đang chờ dừng receiver ${target} thật` : 'Đang chờ dừng RPC Server thật'}</strong><code>{command}</code><code>{`.\u005cscripts\u005ckv-demo.ps1 -Action start -Service ${service}`}</code><small>Lệnh dành cho Docker Compose. Process mode dùng test harness riêng; dashboard không điều khiển Docker.</small></div>}
+    {external && <div className="external-fault" role="status"><strong>{stage === 'PAUSED_AFTER_PREPARE' ? participantCrash ? `PREPARED · dừng Participant ${target}, rồi Bước tiếp` : 'PREPARED · chưa ghi quyết định' : stage === 'PAUSED_AFTER_COMMIT' ? 'COMMIT bền vững · B/C chưa nhận' : stage === 'AWAIT_CONTAINER_RESTART' ? 'Đang chờ crash và restart Node A thật' : stage === 'AWAIT_RECEIVER_STOP' ? `Đang chờ dừng receiver ${target} thật` : 'Đang chờ dừng RPC Server thật'}</strong>{state.runtime?.containerized ? <><code>{command}</code><code>{`.\u005cscripts\u005ckv-demo.ps1 -Action start -Service ${service}`}</code><small>Dừng/khởi động container bằng Docker Compose trên máy này.</small></> : <><small>Process mode: dừng và khởi động lại tiến trình bằng PowerShell, giữ nguyên thư mục dữ liệu. Không cần Docker.</small><code>HUONG_DAN_THUYET_TRINH.md · mục 4</code></>}</div>}
     <div className="kv-values">{names.map(name => {
       const node = state.nodes[name]
       const alive = state.services[name]?.alive

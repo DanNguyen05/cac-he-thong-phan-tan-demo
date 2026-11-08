@@ -66,20 +66,20 @@ export function serviceData(page: Page, state: Snapshot) {
   return list.map(item => ({ ...item, page }))
 }
 
-export function useFreshEvents(state: Snapshot) {
+export function useFreshEvents(state: Snapshot, active = true) {
   const [fresh, setFresh] = useState<number[]>([])
-  const previous = useRef<{ run: string | undefined; seq: number }>({ run: undefined, seq: 0 })
+  const previous = useRef<{ run: string | undefined; seq: number; active: boolean }>({ run: undefined, seq: 0, active })
   const last = state.events.at(-1)?.seq || 0
   useEffect(() => {
     const old = previous.current
-    if (old.run === state.run?.id && old.seq > 0 && last > old.seq) {
+    if (active && old.active && old.run === state.run?.id && old.seq > 0 && last > old.seq) {
       setFresh(state.events.filter(e => e.seq > old.seq).map(e => e.seq))
-    } else setFresh([])
-    previous.current = { run: state.run?.id, seq: last }
-    const timer = window.setTimeout(() => setFresh([]), 1100)
+    } else setFresh(current => current.length ? [] : current)
+    previous.current = { run: state.run?.id, seq: last, active }
+    const timer = window.setTimeout(() => setFresh(current => current.length ? [] : current), 1100)
     return () => window.clearTimeout(timer)
-  }, [last, state.run?.id]) // Only new journal events trigger a finite pulse.
-  return fresh
+  }, [last, state.run?.id, active]) // Reopening a cached canvas is not new network activity.
+  return active ? fresh : []
 }
 
 export function useMessages(state: Snapshot) {

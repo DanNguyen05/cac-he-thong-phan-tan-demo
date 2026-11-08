@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Catalog, LogEvent, Module, Page, Snapshot } from './types'
 import { EMPTY } from './types'
 import { modules } from './content'
 import { apiBase, eventURL, post } from './api'
+import { reconcileSnapshot } from './snapshot'
+import { runControls } from './runControls'
 
 function routePage(): Page {
   const value = location.pathname.split("/").filter(Boolean).at(-1)
@@ -36,7 +38,7 @@ export default function useLab() {
   useEffect(() => {
     fetch(apiBase + '/catalog', { credentials: 'include' }).then(r => { if (!r.ok) throw new Error('Không tải được danh sách kịch bản'); return r.json() }).then(setCatalog).catch(e => setError(String(e)))
     const source = new EventSource(eventURL, { withCredentials: true })
-    source.addEventListener('snapshot', (event: MessageEvent) => { setState(JSON.parse(event.data)); setConnected(true); receivedRef.current = Date.now(); setReceivedAt(receivedRef.current) })
+    source.addEventListener('snapshot', (event: MessageEvent) => { const next = JSON.parse(event.data) as Snapshot; setState(previous => reconcileSnapshot(previous, next)); setConnected(true); receivedRef.current = Date.now(); setReceivedAt(receivedRef.current) })
     source.onerror = () => setConnected(false)
     const timer = window.setInterval(() => { if (Date.now() - receivedRef.current > 10000) setConnected(false) }, 2000)
     return () => { source.close(); window.clearInterval(timer) }
@@ -60,13 +62,11 @@ export default function useLab() {
     history.pushState({}, '', next === 'overview' ? '/' : '/' + next)
     setPage(next); setScenario('normal'); setSelected(null)
   }
-  const running = ['RUNNING', 'WAITING'].includes(state.run?.status || '')
+  const { running, unresolved, externalWait } = runControls(state)
   const paused = state.run?.config.paused === true
-  const externalWait = state.runtime && ['AWAIT_CONTAINER_RESTART', 'AWAIT_RPC_STOP', 'AWAIT_RECEIVER_STOP'].includes(String(state.run?.result?.stage))
   const canPause = running && state.run?.config.mode === 'auto' && !externalWait
-  const unresolved = ['BLOCKED', 'DECISION_PENDING', 'INTERRUPTED'].includes(state.run?.status || '')
   const current = page === 'overview' || state.run?.module === page
-  const display: Snapshot = current ? state : { ...state, run: null, events: [], transactions: [] }
+  const display = useMemo<Snapshot>(() => current ? state : { ...state, run: null, events: EMPTY.events, transactions: EMPTY.transactions }, [current, state])
   const latest = display.events.find(event => event.seq === selected) || display.events.at(-1)
   const module = page === 'overview' ? null : modules[page]
   const liveCount = Object.values(state.services).filter(s => s.alive).length

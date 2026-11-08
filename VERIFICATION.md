@@ -97,3 +97,33 @@ Release được tạo từ source và bundle chuẩn, kiểm tra CRC/source mat
 Đã chạy lại lost-response trên host preview: HTTP result attempts=2, actual_executions=1; GET counter=1. Truy vấn trực tiếp SQLite RPC cho counter=1, journal RPC_EXECUTED của run đúng một dòng, dedup lưu cached result=1. SQLite của node A trong browser fault harness cho checkpoint=100, hai redo -3/-2 và inventory=95 sau restart. Artifact: test-results/kv-data-verification.json. Đây là bằng chứng host storage, không phải Docker volume.
 
 Chỉ báo thiếu sequence trên dashboard được suy ra từ received rows thực của receiver, không tự tạo success. Kết quả global verified vẫn do backend HTTP verification quyết định. Sau khi bổ sung chỉ báo này, browser multicast được chạy lại riêng và đạt (test-results/kv-multicast-final.json); cả hai production builds cũng được tạo lại.
+
+## Cập nhật frontend và hướng dẫn — 08/11/2026
+
+Không sửa backend/API/giao thức. Frontend giữ các topology đã mở để tránh mount lại React Flow khi chuyển mục, chia sẻ tham chiếu của dữ liệu SSE không đổi, giữ zoom/pan và không phát lại thông điệp cũ khi mở lại canvas. SVG dùng marker ID riêng cho từng canvas. Chỉ dữ liệu/sự kiện backend mới làm thay đổi trạng thái giao thức; heartbeat vẫn cập nhật thời gian quan sát trong inspector.
+
+Đã sửa khóa nút sai ở phiên KV RPC/Group/Recovery `INTERRUPTED`: có thể chọn scenario, Step, tốc độ và Run lại mà không xóa dữ liệu. `BLOCKED`, `DECISION_PENDING` và commit bị gián đoạn vẫn giữ yêu cầu recovery. Step tại điểm PREPARED của một phiên còn sống vẫn dùng được. Banner lỗi bên ngoài không còn lấy stage cũ của phiên đã gián đoạn; Process mode không hiển thị lệnh Docker để điều khiển process.
+
+Đo trước/sau bằng Edge headless, viewport 1440×1000, CPU throttling 4×, 15 lượt chuyển qua năm workspace:
+
+| Chỉ số | Trước | Sau |
+|---|---:|---:|
+| Thời gian chuyển mục trung bình | 130.8 ms | 93.6 ms |
+| Khoảng cách giữa frame p95 khi chuyển mục | 34.7 ms | 13.9 ms |
+| Long tasks trong lượt chuyển mục | 12 | 4 |
+| DOM mutations của topology khi đứng yên 3 giây | 48 | 0 |
+
+Đây là phép đo trên môi trường cụ thể, không bảo đảm 60/120 FPS cho mọi máy. Một số lần mở topology đầu tiên vẫn có long task. Artifact cục bộ: `test-results/ui-performance-before.json`, `ui-performance-after.json`.
+
+Kiểm tra lại trước khi push:
+
+- **56/56 backend tests** đạt với `python -m pytest tests -q` (99.40 giây); một PendingDeprecationWarning từ import `multipart` của dependency. Vòng này dùng process, không phải Docker.
+- **10/10** kiểm thử trong `kv-controls.spec.ts`, `kv-performance.spec.ts`, `kv-fault.spec.ts` đạt. Có cả fixture UI để kiểm tra các trạng thái khóa và browser dùng sáu process thực riêng để crash/restart Coordinator trước/sau durable decision, recovery A, catch-up B và restart RPC. Không suy ra Docker thành công từ vòng này.
+- Production build chuẩn React Flow đạt; TypeScript được kiểm tra trong `npm run build`. Build SVG-only đạt với `npm run build:offline -- --outDir dist-offline`, không ghi đè bundle đang phục vụ.
+- Browser smoke SVG tại RPC và Commit đạt; marker ID của các canvas được cache không trùng nhau. Không gọi Run/reset trong smoke này.
+- Chạy trực tiếp Run trên host preview cho lost response: **2 attempts / 1 execution**, counter **7 → 8**, backend `verified=true`, không gọi reset. Người dùng có thể tiếp tục tăng counter sau bước kiểm chứng này.
+- Smoke browser cả năm workspace, Presentation/Esc đạt; không ghi nhận page error. Hướng dẫn thuyết trình được kiểm tra UTF-8, liên kết nội bộ và cú pháp 13 block PowerShell; việc parse cú pháp không phải xác nhận đã chạy các lệnh Docker.
+
+Các vòng hiệu năng ngày 07/11 từng có một lỗi legacy test đọc `.run.status` khi `run=null`, và một lần fault harness không khởi động được do paging file/disk. Vòng fault browser ngày 08/11 nêu trên đã chạy lại đạt; bộ browser legacy đầy đủ chưa được chạy lại trong bản sửa này. Không đổi các kết quả lịch sử thành một tuyên bố mọi test đều đạt.
+
+Hướng dẫn dành cho người thuyết trình: [HUONG_DAN_THUYET_TRINH.md](HUONG_DAN_THUYET_TRINH.md). Docker vẫn là yêu cầu nghiệm thu mục tiêu; Process mode đang mở tại 19100 là phương án dự phòng. Engine/container network/volume/recreate vẫn cần nghiệm thu khi Docker hoạt động.

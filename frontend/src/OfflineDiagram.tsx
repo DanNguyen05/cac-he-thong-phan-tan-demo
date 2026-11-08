@@ -1,19 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Database, Laptop, Layers, Minus, Monitor, Plus, Scan, Server, Workflow } from 'lucide-react'
 import type { Page, Snapshot } from './types'
 import { tone } from './types'
 import { eventLabel, serviceData, useFreshEvents } from './topology'
 
-export default function OfflineDiagram({ page, state, onInspect }: { page: Page; state: Snapshot; onInspect: (id: string) => void }) {
+export default function OfflineDiagram({ page, state, onInspect, active = true }: { page: Page; state: Snapshot; onInspect: (id: string) => void; active?: boolean }) {
+  const arrowId = 'offline-arrow-' + useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const container = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 900, height: 420 })
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [offsets, setOffsets] = useState<Record<string, { x: number; y: number }>>({})
   const drag = useRef<{ id: string; x: number; y: number; ox: number; oy: number; moved: boolean } | null>(null)
-  const fresh = useFreshEvents(state)
+  const fresh = useFreshEvents(state, active)
   useEffect(() => {
-    const observer = new ResizeObserver(entries => setSize({ width: entries[0].contentRect.width, height: entries[0].contentRect.height }))
+    const observer = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      if (width && height) setSize(previous => previous.width === width && previous.height === height ? previous : { width, height })
+    })
     if (container.current) observer.observe(container.current)
     return () => observer.disconnect()
   }, [])
@@ -52,7 +56,7 @@ export default function OfflineDiagram({ page, state, onInspect }: { page: Page;
       else setOffsets(value => ({ ...value, [current.id]: { x: current.ox + dx / scale, y: current.oy + dy / scale } }))
     }} onPointerUp={end} onPointerCancel={() => { drag.current = null }}>
     <div className="offline-world" style={{ width: worldWidth, height: worldHeight, transform: `translate(${(size.width - worldWidth * scale) / 2 + pan.x}px,${(size.height - worldHeight * scale) / 2 + pan.y}px) scale(${scale})` }}>
-      <svg className="offline-edges" width={worldWidth} height={worldHeight}><defs><marker id="offline-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="context-stroke" /></marker></defs>
+      <svg className="offline-edges" width={worldWidth} height={worldHeight}><defs><marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="context-stroke" /></marker></defs>
         {lines.map(line => {
           const from = boxes.find(box => box.id === line.source)!, to = boxes.find(box => box.id === line.target)!
           const horizontal = line.rpc && !compact
@@ -65,7 +69,7 @@ export default function OfflineDiagram({ page, state, onInspect }: { page: Page;
           const path = horizontal ? `M${x1} ${y1} Q${(x1 + x2) / 2} ${middle + (line.reverse ? 70 : -70)} ${x2} ${y2}` : `M${x1} ${y1} V${middle} H${x2} V${y2}`
           const labelX = horizontal || ['checkpoint', 'log'].includes(line.target) || !(line.reverse ? y1 > y2 : y2 > y1) ? (x1 + x2) / 2 : line.reverse ? x1 : x2, labelY = middle + (horizontal ? line.reverse ? 70 : -70 : 0)
           const width = horizontal ? 260 : ['checkpoint', 'log'].includes(line.target) ? 80 : 170
-          return <g key={line.id}><path d={path} fill="none" stroke={line.color} strokeWidth={3} strokeDasharray={line.seq ? undefined : '7 6'} opacity={line.seq ? 1 : .5} markerEnd="url(#offline-arrow)" /><g className="message-label" transform={`translate(${labelX},${labelY})`}><rect x={-width / 2} y={-22} width={width} height={44} rx={22} /><text textAnchor="middle" dy="6" fill={line.color}>{line.label}</text></g>{fresh.includes(line.seq) && <circle className="message-pulse" r={6} fill={line.color} key={line.seq}><animateMotion dur=".8s" repeatCount="1" path={path} /></circle>}</g>
+          return <g key={line.id}><path d={path} fill="none" stroke={line.color} strokeWidth={3} strokeDasharray={line.seq ? undefined : '7 6'} opacity={line.seq ? 1 : .5} markerEnd={`url(#${arrowId})`} /><g className="message-label" transform={`translate(${labelX},${labelY})`}><rect x={-width / 2} y={-22} width={width} height={44} rx={22} /><text textAnchor="middle" dy="6" fill={line.color}>{line.label}</text></g>{fresh.includes(line.seq) && <circle className="message-pulse" r={6} fill={line.color} key={line.seq}><animateMotion dur=".8s" repeatCount="1" path={path} /></circle>}</g>
         })}
       </svg>
       {boxes.map(box => {
